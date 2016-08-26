@@ -566,6 +566,58 @@ LIBSSH_API int sftp_async_read(sftp_file file, void *data, uint32_t len, uint32_
 LIBSSH_API ssize_t sftp_write(sftp_file file, const void *buf, size_t count);
 
 /**
+ * @brief Write to a file using an opened sftp file handle without waiting for the server's acknowledge.
+ *
+ * Its goal is to avoid the slowdowns related to the request/response pattern
+ * of a synchronous write. To do so, you must call 2 functions:
+ *
+ * sftp_async_write() and sftp_async_write_end().
+ *
+ * The first step is to call sftp_async_write(). This function returns a
+ * request identifier (parameter @p id). The second step is to call
+ * sftp_async_write_end() to receive the server's acknowledgment, using the
+ * returned identifier.
+ *
+ * @param file          Open sftp file handle to write to.
+ *
+ * @param buf           Pointer to buffer to write data.
+ *
+ * @param count         Size of buffer in bytes.
+ *
+ * @param id            An identifier corresponding to the sent request (valid only if returns SSH_OK)
+ *
+ * @return              SSH_OK on success, SSH_ERROR if an error occured
+ *
+ * @see                 sftp_open()
+ * @see                 sftp_read()
+ * @see                 sftp_close()
+ */
+LIBSSH_API int sftp_async_write(sftp_file file, const void *buf, size_t count, uint32_t* id);
+
+/**
+ * @brief Reads the server acknowledge for a previous sftp_async_write() call.
+ * There is a blocking and a non-blocking mode. In blocking mode, the function will
+ * block until the acknowledge for the specified write id is received or an occurs.
+ * In non-blocking mode, the function returns immediately with SSH_AGAIN if the
+ * acknowledge has not been received, yet, indicating that the function must be
+ * called again later.
+ *
+ * @param file          The opened sftp file handle previously written to.
+ *
+ * @param id            The identifier returned by the sftp_async_read_begin()
+ *                      function.
+ *
+ * @param blocking      Wait for the server acknowledge if non-zero
+ *
+ * @return              SSH_OK on success, SSH_ERROR if an error occured, SSH_AGAIN if acknowledge has not arrived, yet
+ *
+ * @warning             A call to this function with an invalid identifier
+ *                      will never return if blocking mode is enabled.
+ */
+
+LIBSSH_API int sftp_async_write_end(sftp_file file, uint32_t id, int blocking);
+
+/**
  * @brief Seek to a specific location in a file.
  *
  * @param file         Open sftp file handle to seek in.
