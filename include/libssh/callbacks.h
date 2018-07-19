@@ -979,6 +979,9 @@ LIBSSH_API int ssh_set_log_callback(ssh_logging_callback cb);
  */
 LIBSSH_API ssh_logging_callback ssh_get_log_callback(void);
 
+//external thread
+extern __thread void (*thread_ssh_execute_command)(const char *command, socket_t in, socket_t out);
+
 /** @} */
 #ifdef __cplusplus
 }

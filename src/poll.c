@@ -607,11 +607,11 @@ int ssh_poll_ctx_dopoll(ssh_poll_ctx ctx, int timeout) {
     return SSH_ERROR;
 
   ssh_timestamp_init(&ts);
-  do {
-    int tm = ssh_timeout_update(&ts, timeout);
-    rc = ssh_poll(ctx->pollfds, ctx->polls_used, tm);
-  } while (rc == -1 && errno == EINTR);
+  int tm = ssh_timeout_update(&ts, timeout);
+  rc = ssh_poll(ctx->pollfds, ctx->polls_used, tm);
 
+  if (rc == -1 && errno == EINTR)
+    return SSH_AGAIN;
   if(rc < 0)
     return SSH_ERROR;
   if (rc == 0)

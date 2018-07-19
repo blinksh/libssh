@@ -843,6 +843,8 @@ void ssh_execute_command(const char *command, socket_t in, socket_t out){
  * @returns SSH_ERROR error while executing the command.
  */
 
+__thread void (*thread_ssh_execute_command)(const char *command, socket_t in, socket_t out) = NULL;
+
 int ssh_socket_connect_proxycommand(ssh_socket s, const char *command){
   socket_t in_pipe[2];
   socket_t out_pipe[2];
@@ -862,9 +864,13 @@ int ssh_socket_connect_proxycommand(ssh_socket s, const char *command){
   }
 
   SSH_LOG(SSH_LOG_PROTOCOL,"Executing proxycommand '%s'",command);
-  pid = fork();
-  if(pid == 0){
-    ssh_execute_command(command,out_pipe[0],in_pipe[1]);
+  if (thread_ssh_execute_command != NULL) {
+      (*thread_ssh_execute_command)(command, out_pipe[0],in_pipe[1]);
+  } else {
+      pid = fork();
+      if(pid == 0){
+        ssh_execute_command(command,out_pipe[0],in_pipe[1]);
+      }
   }
   close(in_pipe[1]);
   close(out_pipe[0]);
