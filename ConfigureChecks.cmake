@@ -156,6 +156,15 @@ if (NOT WIN32)
   check_function_exists(snprintf HAVE_SNPRINTF)
 endif (NOT WIN32)
 
+if (APPLE)
+  # libdispatch
+  check_include_file(dispatch/dispatch.h HAVE_DISPATCH_H)
+  check_library_exists(dispatch dispatch_queue_set_specific "" HAVE_LIBDISPATCH)
+  if (HAVE_LIBDISPATCH)
+      set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} dispatch)
+  endif (HAVE_LIBDISPATCH)
+endif (APPLE)
+
 if (WIN32)
     check_symbol_exists(vsnprintf "stdio.h" HAVE_VSNPRINTF)
     check_symbol_exists(snprintf "stdio.h" HAVE_SNPRINTF)

@@ -68,6 +68,15 @@
  #include <netdb.h>
 #endif /* _WIN32 */
 
+#if defined(__APPLE__) && defined(__MACH__)
+  /* Apple OSX and iOS (Darwin) */
+  #include <Availability.h>
+  #if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070 || __IPHONE_OS_VERSION_MIN_REQUIRED >= 50000
+    #include <dispatch/dispatch.h>
+    #define LIBSSH_HAVE_DISPATCH 1
+  #endif
+#endif
+
 #define SSH_STRINGIFY(s) SSH_TOSTRING(s)
 #define SSH_TOSTRING(s) #s
 

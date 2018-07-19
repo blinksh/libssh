@@ -86,6 +86,9 @@
 /* Define to 1 if you have DSA */
 #cmakedefine HAVE_DSA 1
 
+/* Define to 1 if you have the <dispatch/dispatch.h> header file. */
+#cmakedefine HAVE_DISPATCH_H 1
+
 /*************************** FUNCTIONS ***************************/
 
 /* Define to 1 if you have the `EVP_aes128_ctr' function. */
