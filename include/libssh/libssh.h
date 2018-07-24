@@ -775,6 +775,12 @@ LIBSSH_API uint32_t ssh_buffer_get_data(ssh_buffer buffer, void *data, uint32_t 
 LIBSSH_API void *ssh_buffer_get(ssh_buffer buffer);
 LIBSSH_API uint32_t ssh_buffer_get_len(ssh_buffer buffer);
 
+#ifdef LIBSSH_HAVE_DISPATCH
+  LIBSSH_API dispatch_queue_t ssh_session_get_queue(ssh_session session);
+  LIBSSH_API long ssh_session_wait(ssh_session session, dispatch_time_t time);
+#endif
+
+
 #ifndef LIBSSH_LEGACY_0_4
 #include "libssh/legacy.h"
 #endif

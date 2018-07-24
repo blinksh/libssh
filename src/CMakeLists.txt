@@ -150,9 +150,9 @@ set(libssh_SRCS
   pki_container_openssh.c
   pki_ed25519.c
   poll.c
-  session.c
+  session.m
   scp.c
-  socket.c
+  socket.m
   string.c
   threads.c
   wrapper.c

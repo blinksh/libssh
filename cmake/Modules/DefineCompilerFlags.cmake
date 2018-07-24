@@ -82,3 +82,5 @@ if (OSX)
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-deprecated-declarations")
 endif (OSX)
 
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fobjc-arc")
+

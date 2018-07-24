@@ -53,6 +53,60 @@
 #include "libssh/poll.h"
 #include "libssh/session.h"
 
+#include <Foundation/Foundation.h>
+
+@interface IO: NSObject
+@property dispatch_io_t in;
+@property dispatch_io_t out;
+@property dispatch_data_t out_data;
+@property dispatch_source_t out_wontblock;
+
+- (void)signalInQueue:(dispatch_queue_t) queue;
+- (int)wait:(dispatch_time_t) time withQueue:(dispatch_queue_t) queue;
+@end
+
+@implementation IO {
+  NSMutableArray *_semas;
+}
+- (instancetype) init {
+  if (self = [super init]) {
+    _semas = [[NSMutableArray alloc] init];
+    _out_data = dispatch_data_empty;
+  }
+  return self;
+}
+
+- (void)signalInQueue:(dispatch_queue_t) queue {
+  if (_semas.count == 0) {
+    return;
+  }
+  dispatch_async(queue, ^{
+    for (dispatch_semaphore_t sema in _semas) {
+      dispatch_semaphore_signal(sema);
+    }
+    [_semas removeAllObjects];
+  });
+}
+
+- (int)wait:(dispatch_time_t) time withQueue:(dispatch_queue_t) queue {
+  __block dispatch_semaphore_t sema;
+  dispatch_sync(queue, ^{
+    sema = dispatch_semaphore_create(0);
+    [_semas addObject:sema];
+  });
+  long res = dispatch_semaphore_wait(sema, time);
+  if (res == 0) {
+    return SSH_OK;
+  } else {
+    return SSH_AGAIN;
+  }
+}
+
+- (void)dealloc
+{
+  NSLog(@"io dealoc");
+}
+@end
 /**
  * @internal
  *
@@ -78,17 +132,24 @@ struct ssh_socket_struct {
   socket_t fd_out;
   int fd_is_socket;
   int last_errno;
+  int data_except;
+  enum ssh_socket_states_e state;
+  ssh_session session;
+  ssh_socket_callbacks callbacks;
+  ssh_buffer in_buffer;
+
+#ifdef HAVE_DISPATCH_H
+  void *io;
+#else
   int read_wontblock; /* reading now on socket will
                        not block */
   int write_wontblock;
-  int data_except;
-  enum ssh_socket_states_e state;
   ssh_buffer out_buffer;
-  ssh_buffer in_buffer;
-  ssh_session session;
-  ssh_socket_callbacks callbacks;
   ssh_poll_handle poll_in;
   ssh_poll_handle poll_out;
+#endif
+
+
 };
 
 static int sockets_initialized = 0;
@@ -151,12 +212,19 @@ ssh_socket ssh_socket_new(ssh_session session) {
   s->last_errno = -1;
   s->fd_is_socket = 1;
   s->session = session;
+  s->data_except = 0;
+  s->state=SSH_SOCKET_NONE;
   s->in_buffer = ssh_buffer_new();
   if (s->in_buffer == NULL) {
     ssh_set_error_oom(session);
     SAFE_FREE(s);
     return NULL;
   }
+#if HAVE_DISPATCH_H
+  s->io = (__bridge_retained void*)[[IO alloc] init];
+#else
+  s->read_wontblock = 0;
+  s->write_wontblock = 0;
   s->out_buffer=ssh_buffer_new();
   if (s->out_buffer == NULL) {
     ssh_set_error_oom(session);
@@ -164,11 +232,9 @@ ssh_socket ssh_socket_new(ssh_session session) {
     SAFE_FREE(s);
     return NULL;
   }
-  s->read_wontblock = 0;
-  s->write_wontblock = 0;
-  s->data_except = 0;
   s->poll_in=s->poll_out=NULL;
-  s->state=SSH_SOCKET_NONE;
+#endif
+
   return s;
 }
 
@@ -182,12 +248,17 @@ void ssh_socket_reset(ssh_socket s){
   s->fd_out= SSH_INVALID_SOCKET;
   s->last_errno = -1;
   s->fd_is_socket = 1;
+  s->data_except = 0;
   ssh_buffer_reinit(s->in_buffer);
-  ssh_buffer_reinit(s->out_buffer);
+#if HAVE_DISPATCH_H
+  /* IO *arcWillFreeMe = */ (__bridge_transfer IO*)s->io;
+  s->io = (__bridge_retained void*)[[IO alloc] init];
+#else
   s->read_wontblock = 0;
   s->write_wontblock = 0;
-  s->data_except = 0;
+  ssh_buffer_reinit(s->out_buffer);
   s->poll_in=s->poll_out=NULL;
+#endif
   s->state=SSH_SOCKET_NONE;
 }
 
@@ -203,6 +274,7 @@ void ssh_socket_set_callbacks(ssh_socket s, ssh_socket_callbacks callbacks){
 	s->callbacks=callbacks;
 }
 
+#ifndef HAVE_DISPATCH_H
 /**
  * @brief               SSH poll callback. This callback will be used when an event
  *                      caught on the socket.
@@ -349,18 +421,24 @@ int ssh_socket_pollcallback(struct ssh_poll_handle_struct *p, socket_t fd,
     return (s->poll_in == NULL || s->poll_out == NULL) ? -1 : 0;
 }
 
+#endif
+
 /** @internal
  * @brief returns the input poll handle corresponding to the socket,
  * creates it if it does not exist.
  * @returns allocated and initialized ssh_poll_handle object
  */
 ssh_poll_handle ssh_socket_get_poll_handle_in(ssh_socket s){
+#ifdef HAVE_DISPATCH_H
+    return NULL;
+#else
 	if(s->poll_in)
 		return s->poll_in;
 	s->poll_in=ssh_poll_new(s->fd_in,0,ssh_socket_pollcallback,s);
 	if(s->fd_in == s->fd_out && s->poll_out == NULL)
     s->poll_out=s->poll_in;
 	return s->poll_in;
+#endif
 }
 
 /** @internal
@@ -369,12 +447,16 @@ ssh_poll_handle ssh_socket_get_poll_handle_in(ssh_socket s){
  * @returns allocated and initialized ssh_poll_handle object
  */
 ssh_poll_handle ssh_socket_get_poll_handle_out(ssh_socket s){
+#ifdef HAVE_DISPATCH_H
+    return NULL;
+#else
   if(s->poll_out)
     return s->poll_out;
   s->poll_out=ssh_poll_new(s->fd_out,0,ssh_socket_pollcallback,s);
   if(s->fd_in == s->fd_out && s->poll_in == NULL)
     s->poll_in=s->poll_out;
   return s->poll_out;
+#endif
 }
 
 /** \internal
@@ -386,7 +468,12 @@ void ssh_socket_free(ssh_socket s){
   }
   ssh_socket_close(s);
   ssh_buffer_free(s->in_buffer);
+#ifdef HAVE_DISPATCH_H
+  (__bridge_transfer IO*)s->io;
+  s->io = NULL;
+#else
   ssh_buffer_free(s->out_buffer);
+#endif
   SAFE_FREE(s);
 }
 
@@ -443,6 +530,13 @@ void ssh_socket_close(ssh_socket s){
 #endif
   }
 
+#if HAVE_DISPATCH_H
+  IO *io = (__bridge IO*)s->io;
+  io.in = nil;
+  io.out = nil;
+  io.out_wontblock = nil;
+  io.out_data = dispatch_data_empty;
+#else
   if(s->poll_in != NULL){
     if(s->poll_out == s->poll_in)
       s->poll_out = NULL;
@@ -453,9 +547,107 @@ void ssh_socket_close(ssh_socket s){
     ssh_poll_free(s->poll_out);
     s->poll_out=NULL;
   }
+#endif
 
   s->state = SSH_SOCKET_CLOSED;
 }
+
+#ifdef HAVE_DISPATCH_H
+
+dispatch_io_t ssh_socket_create_io(ssh_socket s, dispatch_fd_t fd) {
+  dispatch_queue_t eq = (__bridge dispatch_queue_t)s->session->queue_ptr;
+  dispatch_io_t io = dispatch_io_create(DISPATCH_IO_STREAM, fd, eq, ^(int error) {
+    if (error) {
+      //s->session->alive = 0; 
+      //NSLog(@"Error");
+      return;
+    }
+//    close(fd);
+  });
+  return io;
+}
+
+void ssh_socket_set_write(ssh_socket s) {
+    dispatch_queue_t eq = (__bridge dispatch_queue_t)s->session->queue_ptr;
+    IO *io = (__bridge IO*)s->io;
+    io.out_wontblock = dispatch_source_create(DISPATCH_SOURCE_TYPE_WRITE, s->fd_out, 0, eq);
+    dispatch_source_set_event_handler(io.out_wontblock, ^{
+ //       [io signalInQueue:eq];
+        /* First, POLLOUT is a sign we may be connected */
+        if (s->state == SSH_SOCKET_CONNECTING) {
+            SSH_LOG(SSH_LOG_PACKET, "Received POLLOUT in connecting state");
+            s->state = SSH_SOCKET_CONNECTED;
+            if (s->callbacks && s->callbacks->connected) {
+                s->callbacks->connected(SSH_SOCKET_CONNECTED_OK, 0,
+                                        s->callbacks->userdata);
+            }
+            return;
+        }
+        /* If buffered data is pending, write it */
+        if (io.out_data != dispatch_data_empty) {
+          ssh_socket_nonblocking_flush(s);
+        }
+        dispatch_source_cancel(io.out_wontblock);
+//        } else if (s->callbacks && s->callbacks->controlflow) {
+//          /* Otherwise advertise the upper level that write can be done */
+//          SSH_LOG(SSH_LOG_TRACE,"sending control flow event");
+//          s->callbacks->controlflow(SSH_SOCKET_FLOW_WRITEWONTBLOCK,
+//                                    s->callbacks->userdata);
+//        }
+    });
+    dispatch_activate(io.out_wontblock);
+}
+
+
+void ssh_socket_set_io_read(ssh_socket s) {
+    dispatch_queue_t eq = (__bridge dispatch_queue_t)s->session->queue_ptr;
+    IO *io = (__bridge IO*)s->io;
+    dispatch_io_set_low_water(io.in, 1);
+    dispatch_data_applier_t buffer_writer = ^bool(dispatch_data_t region, size_t offset, const void * buffer, size_t size) {
+        if (s->session->socket_counter != NULL) {
+            s->session->socket_counter->in_bytes += size;
+        }
+        /* Bufferize the data and then call the callback */
+        int r = ssh_buffer_add_data(s->in_buffer, buffer, size);
+        if (r < 0) {
+            return NO;
+        }
+        return YES;
+    };
+    dispatch_io_read(io.in, 0, SIZE_MAX, eq, ^(bool done, dispatch_data_t data, int error) {
+       [io signalInQueue:eq];
+        if (error != 0) {
+            if (s->callbacks && s->callbacks->exception) {
+                s->callbacks->exception(SSH_SOCKET_EXCEPTION_ERROR,
+                                        s->last_errno, s->callbacks->userdata);
+                }
+            return;
+        }
+        if (done && data == NULL && error == 0) {
+            // EOF
+            if (s->callbacks && s->callbacks->exception) {
+                s->callbacks->exception(SSH_SOCKET_EXCEPTION_EOF,
+                                        0, s->callbacks->userdata);
+            }
+            return;
+        }
+        if (!data) {
+            return;
+        }
+        dispatch_data_apply(data, buffer_writer);
+        int r = 0;
+        if (s->callbacks && s->callbacks->data) {
+            do {
+                r = s->callbacks->data(ssh_buffer_get(s->in_buffer),
+                                       ssh_buffer_get_len(s->in_buffer),
+                                       s->callbacks->userdata);
+                ssh_buffer_pass_bytes(s->in_buffer, r);
+            } while ((r > 0) && (s->state == SSH_SOCKET_CONNECTED));
+        }
+    });
+}
+
+#endif
 
 /**
  * @internal
@@ -468,6 +660,16 @@ void ssh_socket_close(ssh_socket s){
 void ssh_socket_set_fd(ssh_socket s, socket_t fd) {
     s->fd_in = s->fd_out = fd;
 
+#ifdef HAVE_DISPATCH_H
+    dispatch_io_t dio = ssh_socket_create_io(s, fd);
+    IO *io = (__bridge IO*)s->io;
+    io.in = dio;
+    io.out = dio;
+    s->state = SSH_SOCKET_CONNECTING;
+    ssh_socket_set_io_read(s);
+    ssh_socket_set_write(s);
+#else
+
     if (s->poll_in) {
         ssh_poll_set_fd(s->poll_in,fd);
     } else {
@@ -475,10 +677,11 @@ void ssh_socket_set_fd(ssh_socket s, socket_t fd) {
 
         /* POLLOUT is the event to wait for in a nonblocking connect */
         ssh_poll_set_events(ssh_socket_get_poll_handle_in(s), POLLOUT);
-#ifdef _WIN32
+    #ifdef _WIN32
         ssh_poll_add_events(ssh_socket_get_poll_handle_in(s), POLLWRNORM);
-#endif
+    #endif
     }
+#endif
 }
 
 /**
@@ -489,9 +692,17 @@ void ssh_socket_set_fd(ssh_socket s, socket_t fd) {
  */
 void ssh_socket_set_fd_in(ssh_socket s, socket_t fd) {
   s->fd_in = fd;
+
+#ifdef HAVE_DISPATCH_H
+  IO *io = (__bridge IO*)s->io;
+  io.in = ssh_socket_create_io(s, fd);
+  ssh_socket_set_io_read(s);
+#else
   if(s->poll_in)
     ssh_poll_set_fd(s->poll_in,fd);
+#endif
 }
+
 
 /**
  * @internal
@@ -501,8 +712,14 @@ void ssh_socket_set_fd_in(ssh_socket s, socket_t fd) {
  */
 void ssh_socket_set_fd_out(ssh_socket s, socket_t fd) {
   s->fd_out = fd;
+#ifdef HAVE_DISPATCH_H
+  IO *io = (__bridge IO*)s->io;
+  io.out = ssh_socket_create_io(s, fd);
+  ssh_socket_set_write(s);
+#else
   if(s->poll_out)
     ssh_poll_set_fd(s->poll_out,fd);
+#endif
 }
 
 
@@ -520,6 +737,8 @@ socket_t ssh_socket_get_fd_in(ssh_socket s) {
 int ssh_socket_is_open(ssh_socket s) {
   return s->fd_in != SSH_INVALID_SOCKET;
 }
+
+#ifndef HAVE_DISPATCH_H
 
 /** \internal
  * \brief read len bytes from socket into buffer
@@ -580,6 +799,8 @@ static int ssh_socket_unbuffered_write(ssh_socket s, const void *buffer,
   return w;
 }
 
+#endif
+
 /** \internal
  * \brief returns nonzero if the current socket is in the fd_set
  */
@@ -621,10 +842,9 @@ void ssh_socket_fd_set(ssh_socket s, fd_set *set, socket_t *max_fd) {
  */
 int ssh_socket_write(ssh_socket s, const void *buffer, int len) {
   if(len > 0) {
-    if (ssh_buffer_add_data(s->out_buffer, buffer, len) < 0) {
-      ssh_set_error_oom(s->session);
-      return SSH_ERROR;
-    }
+    IO *io = (__bridge IO*)s->io;
+    dispatch_data_t chunk = dispatch_data_create(buffer, len, NULL, DISPATCH_DATA_DESTRUCTOR_DEFAULT);
+    io.out_data = dispatch_data_create_concat(io.out_data, chunk);
     ssh_socket_nonblocking_flush(s);
   }
 
@@ -656,6 +876,42 @@ int ssh_socket_nonblocking_flush(ssh_socket s) {
     return SSH_ERROR;
   }
 
+#ifdef HAVE_DISPATCH_H
+  if (s->state != SSH_SOCKET_CONNECTED) {
+      return SSH_AGAIN;
+  }
+  IO *io = (__bridge IO*)s->io;
+  dispatch_data_t out_data = io.out_data;
+  if (out_data == dispatch_data_empty) {
+      return SSH_OK;
+  }
+  io.out_data = dispatch_data_empty;
+  dispatch_queue_t queue = (__bridge dispatch_queue_t)session->queue_ptr;
+  dispatch_io_write(io.out, 0, out_data, queue, ^(bool done, dispatch_data_t  _Nullable remainingData, int error) {
+          if (remainingData) {
+            NSLog(@"remining data!");
+          }
+          if (error) {
+            NSLog(@"write error: %@", @(error));
+            session->alive = 0;
+            ssh_socket_close(s);
+            if(s->callbacks && s->callbacks->exception){
+              s->callbacks->exception(
+                    SSH_SOCKET_EXCEPTION_ERROR,
+                    s->last_errno,s->callbacks->userdata);
+            } else {
+                ssh_set_error(session, SSH_FATAL,
+                        "Writing packet: error on socket (or connection closed): %s",
+                        strerror(s->last_errno));
+            }
+          }
+          if (s->session->socket_counter != NULL) {
+          // TODO: s->session->socket_counter->out_bytes += w;
+          }
+
+    });
+  return SSH_AGAIN;
+#else
   len = ssh_buffer_get_len(s->out_buffer);
   if (!s->write_wontblock && s->poll_out && len > 0) {
       /* force the poll system to catch pollout events */
@@ -694,17 +950,21 @@ int ssh_socket_nonblocking_flush(ssh_socket s) {
 
       return SSH_AGAIN;
   }
-
+#endif
   /* all data written */
   return SSH_OK;
 }
 
 void ssh_socket_set_write_wontblock(ssh_socket s) {
+#ifndef HAVE_DISPATCH_H
   s->write_wontblock = 1;
+#endif
 }
 
 void ssh_socket_set_read_wontblock(ssh_socket s) {
+#ifndef HAVE_DISPATCH_H
   s->read_wontblock = 1;
+#endif
 }
 
 void ssh_socket_set_except(ssh_socket s) {
@@ -712,11 +972,19 @@ void ssh_socket_set_except(ssh_socket s) {
 }
 
 int ssh_socket_data_available(ssh_socket s) {
+#ifdef HAVE_DISPATCH_H
+    return 1;
+#else
   return s->read_wontblock;
+#endif
 }
 
 int ssh_socket_data_writable(ssh_socket s) {
+#ifdef HAVE_DISPATCH_H
+    return 1;
+#else
   return s->write_wontblock;
+#endif
 }
 
 /** @internal
@@ -725,22 +993,33 @@ int ssh_socket_data_writable(ssh_socket s) {
  * @returns numbers of bytes buffered, or 0 if the socket isn't connected
  */
 int ssh_socket_buffered_write_bytes(ssh_socket s){
+#ifdef HAVE_DISPATCH_H
+	if(s==NULL) {
+        return 0;
+    }
+    IO *io = (__bridge IO*)s->io;
+    return dispatch_data_get_size(io.out_data);
+#else
 	if(s==NULL || s->out_buffer == NULL)
 		return 0;
 	return ssh_buffer_get_len(s->out_buffer);
+#endif
 }
 
 
 int ssh_socket_get_status(ssh_socket s) {
   int r = 0;
-
   if (ssh_buffer_get_len(s->in_buffer) > 0) {
       r |= SSH_READ_PENDING;
   }
 
+#ifndef HAVE_DISPATCH_H
+  // TODO: fix
+
   if (ssh_buffer_get_len(s->out_buffer) > 0) {
       r |= SSH_WRITE_PENDING;
   }
+#endif
 
   if (s->data_except) {
     r |= SSH_CLOSED_ERROR;
@@ -751,12 +1030,14 @@ int ssh_socket_get_status(ssh_socket s) {
 
 int ssh_socket_get_poll_flags(ssh_socket s) {
   int r = 0;
+#ifndef HAVE_DISPATCH_H
   if (s->poll_in != NULL && (ssh_poll_get_events (s->poll_in) & POLLIN) > 0) {
     r |= SSH_READ_PENDING;
   }
   if (s->poll_out != NULL && (ssh_poll_get_events (s->poll_out) & POLLOUT) > 0) {
     r |= SSH_WRITE_PENDING;
   }
+#endif
   return r;
 }
 
@@ -872,21 +1153,31 @@ int ssh_socket_connect_proxycommand(ssh_socket s, const char *command){
         ssh_execute_command(command,out_pipe[0],in_pipe[1]);
       }
   }
-  close(in_pipe[1]);
-  close(out_pipe[0]);
+//  close(in_pipe[1]);
+//  close(out_pipe[0]);
   SSH_LOG(SSH_LOG_PROTOCOL,"ProxyCommand connection pipe: [%d,%d]",in_pipe[0],out_pipe[1]);
   ssh_socket_set_fd_in(s,in_pipe[0]);
   ssh_socket_set_fd_out(s,out_pipe[1]);
   s->state=SSH_SOCKET_CONNECTED;
   s->fd_is_socket=0;
+#ifndef HAVE_DISPATCH_H
   /* POLLOUT is the event to wait for in a nonblocking connect */
   ssh_poll_set_events(ssh_socket_get_poll_handle_in(s),POLLIN);
   ssh_poll_set_events(ssh_socket_get_poll_handle_out(s),POLLOUT);
+#endif
   if(s->callbacks && s->callbacks->connected)
     s->callbacks->connected(SSH_SOCKET_CONNECTED_OK,0,s->callbacks->userdata);
 
   return SSH_OK;
 }
+
+#ifdef HAVE_DISPATCH_H
+int ssh_socket_dispatch_wait(ssh_socket s, dispatch_time_t time) {
+  dispatch_queue_t queue = (__bridge dispatch_queue_t)s->session->queue_ptr;
+  IO *io = (__bridge IO*)s->io;
+  return [io wait:time withQueue:queue];
+}
+#endif
 
 #endif /* _WIN32 */
 /** @} */

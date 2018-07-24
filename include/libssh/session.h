@@ -28,6 +28,10 @@
 #include "libssh/channels.h"
 #include "libssh/poll.h"
 
+#ifdef HAVE_DISPATCH_H
+ #include <dispatch/dispatch.h>
+#endif
+
 /* These are the different states a SSH session can be into its life */
 enum ssh_session_state_e {
 	SSH_SESSION_STATE_NONE=0,
@@ -178,6 +182,9 @@ struct ssh_session_struct {
     struct ssh_list *packet_callbacks;
     struct ssh_socket_callbacks_struct socket_callbacks;
     ssh_poll_ctx default_poll_ctx;
+#ifdef HAVE_DISPATCH_H
+    void* queue_ptr;
+#endif
     /* options */
 #ifdef WITH_PCAP
     ssh_pcap_context pcap_ctx; /* pcap debugging context */

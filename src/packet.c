@@ -347,17 +347,18 @@ int ssh_packet_socket_callback(const void *data, size_t receivedlen, void *user)
             /* Execute callbacks */
             ssh_packet_process(session, session->in_packet.type);
             session->packet_state = PACKET_STATE_INIT;
-            if (processed < receivedlen) {
-                /* Handle a potential packet left in socket buffer */
-                SSH_LOG(SSH_LOG_PACKET,
-                        "Processing %" PRIdS " bytes left in socket buffer",
-                        receivedlen-processed);
-
-                packet = ((uint8_t*)data) + processed;
-
-                rc = ssh_packet_socket_callback(packet, receivedlen - processed,user);
-                processed += rc;
-            }
+        // BLINK:
+//            if (processed < receivedlen) {
+//                /* Handle a potential packet left in socket buffer */
+//                SSH_LOG(SSH_LOG_PACKET,
+//                        "Processing %" PRIdS " bytes left in socket buffer",
+//                        receivedlen-processed);
+//
+//                packet = ((uint8_t*)data) + processed;
+//
+//                rc = ssh_packet_socket_callback(packet, receivedlen - processed,user);
+//                processed += rc;
+//            }
 
             return processed;
         case PACKET_STATE_PROCESSING:

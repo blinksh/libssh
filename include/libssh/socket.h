@@ -65,5 +65,8 @@ struct ssh_poll_handle_struct * ssh_socket_get_poll_handle_in(ssh_socket s);
 struct ssh_poll_handle_struct * ssh_socket_get_poll_handle_out(ssh_socket s);
 
 int ssh_socket_connect(ssh_socket s, const char *host, int port, const char *bind_addr);
+#ifdef HAVE_DISPATCH_H
+int ssh_socket_dispatch_wait(ssh_socket s, dispatch_time_t time);
+#endif
 
 #endif /* SOCKET_H_ */
