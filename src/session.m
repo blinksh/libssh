@@ -101,10 +101,6 @@ ssh_session ssh_new(void) {
     }
 #endif /* _WIN32 */
 
-#ifdef HAVE_DISPATCH_H
-    session->queue_ptr = (__bridge_retained void *)dispatch_queue_create("libssh.session.queue", DISPATCH_QUEUE_SERIAL);
-#endif
-
     /* OPTIONS */
     session->opts.StrictHostKeyChecking = 1;
     session->opts.port = 0;
@@ -238,11 +234,6 @@ void ssh_free(ssh_session session) {
       ssh_buffer_free(session->out_hashbuf);
   }
 
-#ifdef HAVE_DISPATCH_H
-  (__bridge_transfer dispatch_queue_t)session->queue_ptr;
-  session->queue_ptr = NULL;
-#endif
-
   crypto_free(session->current_crypto);
   crypto_free(session->next_crypto);
 
@@ -320,12 +311,6 @@ void ssh_free(ssh_session session) {
   explicit_bzero(session, sizeof(struct ssh_session_struct));
   SAFE_FREE(session);
 }
-
-#ifdef HAVE_DISPATCH_H
-dispatch_queue_t ssh_session_get_queue(ssh_session session) {
-    return (__bridge dispatch_queue_t)session->queue_ptr;
-}
-#endif
 
 /**
  * @brief get the client banner
@@ -633,11 +618,8 @@ int ssh_handle_packets(ssh_session session, int timeout) {
     if (session == NULL || session->socket == NULL) {
       return SSH_ERROR;
     }
-    dispatch_time_t time = DISPATCH_TIME_FOREVER;
-    if (timeout > 0) {
-      time = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_MSEC));
-    }
-    return ssh_socket_dispatch_wait(session->socket, time);
+  
+    return ssh_socket_dispatch_wait(session->socket, timeout);
 #endif
     ssh_poll_handle spoll_in,spoll_out;
     ssh_poll_ctx ctx;
