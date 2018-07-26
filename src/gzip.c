@@ -33,7 +33,7 @@
 #include "libssh/crypto.h"
 #include "libssh/session.h"
 
-#define BLOCKSIZE 4092
+#define BLOCKSIZE 1024 * 4
 
 static z_stream *initcompress(ssh_session session, int level) {
   z_stream *stream = NULL;
@@ -166,22 +166,23 @@ static ssh_buffer gzip_decompress(ssh_session session, ssh_buffer source, size_t
     return NULL;
   }
 
-  zin->next_out = out_buf;
   zin->next_in = in_ptr;
   zin->avail_in = in_size;
 
   do {
+    zin->next_out = out_buf;
     zin->avail_out = BLOCKSIZE;
+
     status = inflate(zin, Z_PARTIAL_FLUSH);
+
     if (status != Z_OK && status != Z_BUF_ERROR) {
       ssh_set_error(session, SSH_FATAL,
           "status %d inflating zlib packet", status);
       ssh_buffer_free(dest);
       return NULL;
     }
-
     len = BLOCKSIZE - zin->avail_out;
-    if (ssh_buffer_add_data(dest,out_buf,len) < 0) {
+    if (ssh_buffer_add_data(dest, out_buf, len) < 0) {
       ssh_buffer_free(dest);
       return NULL;
     }
@@ -190,31 +191,115 @@ static ssh_buffer gzip_decompress(ssh_session session, ssh_buffer source, size_t
       ssh_buffer_free(dest);
       return NULL;
     }
-    zin->next_out = out_buf;
   } while (zin->avail_out == 0);
 
   return dest;
 }
 
-int decompress_buffer(ssh_session session,ssh_buffer buf, size_t maxlen){
-  ssh_buffer dest = NULL;
+static int _gzip_decompress(ssh_session session, ssh_buffer source, void **dest,
+                        size_t *dest_len, size_t maxlen) {
+  z_stream *zin = session->current_crypto->compress_in_ctx;
+  void *in_ptr = ssh_buffer_get(source);
+  unsigned long in_size = ssh_buffer_get_len(source);
 
-  dest = gzip_decompress(session,buf, maxlen);
-  if (dest == NULL) {
+  char *out;
+  int out_maxlen = 4 * in_size;
+
+  /* In practice they never come smaller than this */
+  if (out_maxlen < 25)
+    out_maxlen = 25;
+
+  if (out_maxlen > (int) maxlen)
+    out_maxlen = maxlen;
+
+  if (zin == NULL) {
+    zin = session->current_crypto->compress_in_ctx = initdecompress(session);
+    if (zin == NULL) {
+      return SSH_ERROR;
+    }
+  }
+  zin->next_in = in_ptr;
+  zin->avail_in = in_size;
+  zin->next_out = (unsigned char *) malloc(out_maxlen);
+  out = (char *) zin->next_out;
+  zin->avail_out = out_maxlen;
+  if (!zin->next_out) {
+      ssh_set_error(session, SSH_FATAL,
+          "Unable to allocate decompression buffer");
+      return SSH_ERROR;
+  }
+
+  /* Loop until it's all inflated or hit error */
+  for (;;) {
+    int status;
+    size_t out_ofs;
+    char *newout;
+
+    status = inflate(zin, Z_PARTIAL_FLUSH);
+
+    if (status == Z_OK) {
+      if (zin->avail_out > 0)
+        /* status is OK and the output buffer has not been exhausted so we're done */
+        break;
+    } else if (status == Z_BUF_ERROR) {
+      /* the input data has been exhausted so we are done */
+      break;
+    } else {
+      /* error state */
+      free(out);
+      ssh_set_error(session, SSH_FATAL,
+          "status %d inflating zlib packet", status);
+      return SSH_ERROR;
+    }
+
+    if (out_maxlen >= (int) maxlen) {
+      free(out);
+      ssh_set_error(session, SSH_FATAL,
+          "Excessive growth in decompression phase");
+      return SSH_ERROR;
+    }
+
+    /* If we get here we need to grow the output buffer and try again */
+    out_ofs = out_maxlen - zin->avail_out;
+    out_maxlen *= 2;
+    newout = realloc(out, out_maxlen);
+    if (!newout) {
+      free(out);
+      ssh_set_error(session, SSH_FATAL,
+          "Unable to expand decompression buffer");
+      return SSH_ERROR;
+    }
+    out = newout;
+    zin->next_out = (unsigned char *) out + out_ofs;
+    zin->avail_out = out_maxlen - out_ofs;
+  }
+
+  *dest = (unsigned char *) out;
+  *dest_len = out_maxlen - zin->avail_out;
+
+  return 0;
+}
+
+int decompress_buffer(ssh_session session, ssh_buffer buf, size_t maxlen) {
+
+  size_t out_size;
+  void *buffer = NULL;
+  int rc = _gzip_decompress(session, buf, &buffer, &out_size, maxlen);
+  if (rc == SSH_ERROR) {
     return -1;
   }
 
   if (ssh_buffer_reinit(buf) < 0) {
-    ssh_buffer_free(dest);
+    free(buffer);
     return -1;
   }
 
-  if (ssh_buffer_add_data(buf, ssh_buffer_get(dest), ssh_buffer_get_len(dest)) < 0) {
-    ssh_buffer_free(dest);
+  if (ssh_buffer_add_data(buf, buffer, out_size) < 0) {
+    free(buffer);
     return -1;
   }
 
-  ssh_buffer_free(dest);
+  free(buffer);
   return 0;
 }
 

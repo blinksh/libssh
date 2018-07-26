@@ -56,7 +56,7 @@
  * size of 35000 bytes or less.
  */
 #define CHANNEL_MAX_PACKET 32768
-#define CHANNEL_INITIAL_WINDOW 64000
+#define CHANNEL_INITIAL_WINDOW (2*1024*1024) //64000
 
 /**
  * @defgroup libssh_channel The SSH channel functions
