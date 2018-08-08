@@ -107,10 +107,14 @@ void ssh_buffer_free(struct ssh_buffer_struct *buffer) {
 
   if (buffer->data) {
     /* burn the data */
-    explicit_bzero(buffer->data, buffer->allocated);
+    if (buffer->secure) {
+        explicit_bzero(buffer->data, buffer->allocated);
+    }
     SAFE_FREE(buffer->data);
   }
-  explicit_bzero(buffer, sizeof(struct ssh_buffer_struct));
+  if (buffer->secure) {
+      explicit_bzero(buffer, sizeof(struct ssh_buffer_struct));
+  }
   SAFE_FREE(buffer);
 }
 
@@ -147,7 +151,9 @@ static int realloc_buffer(struct ssh_buffer_struct *buffer, size_t needed) {
         }
         if (buffer->used > 0) {
             memcpy(new, buffer->data,buffer->used);
-            explicit_bzero(buffer->data, buffer->used);
+            if (buffer->secure) {
+                explicit_bzero(buffer->data, buffer->used);
+            }
             SAFE_FREE(buffer->data);
         }
     } else {
@@ -195,7 +201,7 @@ static void buffer_shift(ssh_buffer buffer){
 int ssh_buffer_reinit(struct ssh_buffer_struct *buffer)
 {
     buffer_verify(buffer);
-    if (buffer->used > 0) {
+    if (buffer->used > 0 && buffer->secure) {
         explicit_bzero(buffer->data, buffer->used);
     }
     buffer->used = 0;

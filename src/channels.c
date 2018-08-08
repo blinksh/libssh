@@ -47,9 +47,6 @@
 #include "libssh/server.h"
 #endif
 
-#define WINDOWBASE 1280000
-#define WINDOWLIMIT (WINDOWBASE/2)
-
 /*
  * All implementations MUST be able to process packets with an
  * uncompressed payload length of 32768 bytes or less and a total packet
@@ -57,6 +54,10 @@
  */
 #define CHANNEL_MAX_PACKET 32768
 #define CHANNEL_INITIAL_WINDOW (2*1024*1024) //64000
+
+#define WINDOWBASE CHANNEL_INITIAL_WINDOW * 6 // (1280000)
+#define WINDOWLIMIT (WINDOWBASE/2)
+
 
 /**
  * @defgroup libssh_channel The SSH channel functions

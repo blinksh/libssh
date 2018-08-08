@@ -54,7 +54,8 @@
 #include "libssh/session.h"
 
 #include <Foundation/Foundation.h>
-
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 
 
 /**
@@ -102,8 +103,9 @@ struct ssh_socket_struct {
 
 @interface IO: NSObject <NSStreamDelegate>
 - (int)wait:(int)milliseconds;
-- (void)setupWithFD:(CFSocketNativeHandle)sockFd;
 - (NSInteger)write:(const uint8_t *)buffer maxLength:(NSUInteger)len;
+- (int)connectToHost:(NSString *)host andPort:(int)port;
+- (int)connectedWithInFd:(int)fdIn fdOut:(int)fdOut;
 @end
 
 @implementation IO {
@@ -113,6 +115,10 @@ struct ssh_socket_struct {
   NSInputStream *_inputStream;
   NSOutputStream *_outputStream;
   ssh_socket _ssh_socket;
+
+  CFSocketRef _in_sock_ref;
+  CFRunLoopSourceRef _in_source_ref;
+  dispatch_fd_t _out_fd;
 }
 
 - (instancetype) initWithSSHSocket:(ssh_socket) ssh_socket {
@@ -120,33 +126,119 @@ struct ssh_socket_struct {
     _ssh_socket = ssh_socket;
     _out_data = [[NSMutableData alloc] init];
     _in_data = [[NSMutableData alloc] init];
+    _out_fd = SSH_INVALID_SOCKET;
   }
   return self;
 }
 
-- (void)setupWithFD:(CFSocketNativeHandle)sockFd {
+- (void) close {
+    [_outputStream close];
+    [_inputStream close];
+
+    [_inputStream removeFromRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
+    [_outputStream removeFromRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
+
+    _outputStream = nil;
+    _inputStream = nil;
+
+    if (_in_source_ref) {
+       CFRunLoopSourceInvalidate(_in_source_ref);
+       CFRelease(_in_source_ref);
+       _in_source_ref = NULL;
+     }
+    if (_in_sock_ref) {
+		CFSocketInvalidate(_in_sock_ref);
+		CFRelease(_in_sock_ref);
+		_in_sock_ref = NULL;
+	}
+
+    if (_out_fd != SSH_INVALID_SOCKET) {
+        close(_out_fd);
+        _out_fd = SSH_INVALID_SOCKET;
+    }
+}
+
+- (void)dealloc {
+  [self close];
+}
+
+void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef address, const void *data, void *info) {
+  IO *io = (__bridge IO*)info;
+  ssh_socket s = io->_ssh_socket;
+  switch (type) {
+    case kCFSocketReadCallBack: {
+      const int BUFFER_SIZE = 4096;
+      uint8_t buffer[4096] = {0};
+
+      for (;;) {
+        ssize_t len = read(CFSocketGetNative(sock), buffer, BUFFER_SIZE);
+        if (len == 0) { // EOF
+          if (io->_in_data.length > 0) {
+             [io _process_in_data];
+          }
+          // EOF
+          if (s->callbacks && s->callbacks->exception) {
+              s->callbacks->exception(SSH_SOCKET_EXCEPTION_EOF,
+                0, s->callbacks->userdata);
+          }
+          return;
+        } else if (len < 0) {
+          // try again
+          break;
+        }
+
+        [io->_in_data appendBytes:buffer length:len];
+
+        if (len < BUFFER_SIZE) {
+          break;
+        }
+      }
+
+      [io _process_in_data];
+    }
+      break;
+
+    default:
+      break;
+  }
+}
+
+- (int)connectedWithInFd:(int)fdIn fdOut:(int)fdOut {
+    CFSocketContext ctx = {.info = (__bridge void*)self};
+    _in_sock_ref = CFSocketCreateWithNative(NULL, fdIn, kCFSocketReadCallBack, __in_sock_callback, &ctx);
+
+    _in_source_ref = CFSocketCreateRunLoopSource(NULL, _in_sock_ref, 0);
+    _out_fd = fdOut;
+    CFRunLoopAddSource(CFRunLoopGetCurrent(), _in_source_ref, kCFRunLoopDefaultMode);
+
+    return SSH_OK;
+}
+
+- (int)connectToHost:(NSString *)host andPort:(int)port {
   NSRunLoop *runLoop = [NSRunLoop currentRunLoop];
 
   CFReadStreamRef readStream;
   CFWriteStreamRef writeStream;
 
-  CFStreamCreatePairWithSocket(NULL, sockFd,  &readStream, &writeStream);
+  CFStreamCreatePairWithSocketToHost(NULL, (__bridge CFStringRef)host, port, &readStream, &writeStream);
   _inputStream = (__bridge_transfer NSInputStream *)readStream;
   _outputStream = (__bridge_transfer NSOutputStream *)writeStream;
 
   if (_inputStream == nil || _outputStream == nil) {
-    NSLog(@"Blink: Unable to create stream pair.");
-    return;
+    return SSH_ERROR;
   }
 
   [_inputStream setDelegate:self];
   [_outputStream setDelegate:self];
 
-  [_outputStream scheduleInRunLoop:runLoop forMode:NSDefaultRunLoopMode];
+  _ssh_socket->state = SSH_SOCKET_CONNECTING;
+
   [_inputStream scheduleInRunLoop:runLoop forMode:NSDefaultRunLoopMode];
+  [_outputStream scheduleInRunLoop:runLoop forMode:NSDefaultRunLoopMode];
 
   [_inputStream open];
   [_outputStream open];
+  return SSH_AGAIN;
 }
 
 - (void)stream:(NSStream *)stream handleEvent:(NSStreamEvent)eventCode {
@@ -180,10 +272,21 @@ struct ssh_socket_struct {
 
   switch (eventCode) {
     case NSStreamEventOpenCompleted: {
-      
-      }
-      return;
-    case NSStreamEventHasSpaceAvailable:
+     // Fetch a native handle to our socket
+     CFDataRef nativeHandle = CFWriteStreamCopyProperty((CFWriteStreamRef) _outputStream, kCFStreamPropertySocketNativeHandle);
+     if (nativeHandle) {
+         s->fd_in = s->fd_out = *(int *)CFDataGetBytePtr(nativeHandle);
+         CFRelease(nativeHandle);
+     } else {
+         NSLog(@"Blink: Unable to get socket file descriptor from stream. Breakage may occur.");
+     }
+
+     // Disable Nagle's algorithm
+     if (s->fd_in != -1) {
+         int val = 1;
+         setsockopt(s->fd_in, IPPROTO_TCP, TCP_NODELAY, &val, sizeof(val));
+         NSLog(@"Blink: TCP_NODELAY=1");
+     }
       if (s->state == SSH_SOCKET_CONNECTING) {
         SSH_LOG(SSH_LOG_PACKET, "Received POLLOUT in connecting state");
         s->state = SSH_SOCKET_CONNECTED;
@@ -193,6 +296,9 @@ struct ssh_socket_struct {
         }
         return;
       }
+      }
+      return;
+    case NSStreamEventHasSpaceAvailable:
       [self _writeout];
       return;
     default:
@@ -227,6 +333,14 @@ struct ssh_socket_struct {
   if (len > 0) {
       [_out_data appendBytes:buffer length:len];
   }
+  if (_out_fd != SSH_INVALID_SOCKET) {
+      int written = write(_out_fd, _out_data.bytes, _out_data.length);
+      if (written > 0) {
+        [_out_data replaceBytesInRange:NSMakeRange(0, written) withBytes:NULL length:0];
+      }
+      return written;
+  }
+
   if (_outputStream.hasSpaceAvailable) {
       [self _writeout];
   }
@@ -255,25 +369,28 @@ struct ssh_socket_struct {
 }
 
 - (void)_readin {
-  const int BUFFER_SIZE = 4096;
-  uint8_t buffer[4096] = {0};
+    const int BUFFER_SIZE = 4096;
+    uint8_t buffer[4096] = {0};
 
-  for (;;) {
-    NSInteger len = [_inputStream read:buffer maxLength:BUFFER_SIZE];
-    if (len <= 0) {
-      break;
+    for (;;) {
+        NSInteger len = [_inputStream read:buffer maxLength:BUFFER_SIZE];
+        if (len <= 0) {
+            // TODO: handle -1?
+            break;
+        }
+
+        [_in_data appendBytes:buffer length:len];
+
+        if (len < BUFFER_SIZE) {
+            break;
+        }
     }
 
-    [_in_data appendBytes:buffer length:len];
-
-    if (len < BUFFER_SIZE) {
-      break;
+    if (_in_data.length == 0) {
+        return;
     }
-  }
 
-  if (_in_data.length > 0) {
     [self _process_in_data];
-  }
 }
 
 - (void)_process_in_data {
@@ -303,11 +420,6 @@ struct ssh_socket_struct {
     [_in_data replaceBytesInRange:NSMakeRange(0, consumed) withBytes:NULL length:0];
 }
 
-
-- (void)dealloc
-{
-  NSLog(@"io dealoc");
-}
 @end
 
 static int sockets_initialized = 0;
@@ -674,6 +786,13 @@ int ssh_socket_unix(ssh_socket s, const char *path) {
  * \brief closes a socket
  */
 void ssh_socket_close(ssh_socket s){
+
+#if HAVE_DISPATCH_H
+  IO *io = (__bridge IO*)s->io;
+  [io close];
+  s->fd_in = -1;
+  s->fd_out = -1;
+#else
   if (ssh_socket_is_open(s)) {
 #ifdef _WIN32
     CLOSE_SOCKET(s->fd_in);
@@ -687,11 +806,6 @@ void ssh_socket_close(ssh_socket s){
     s->last_errno = errno;
 #endif
   }
-
-#if HAVE_DISPATCH_H
-  IO *io = (__bridge IO*)s->io;
-  // TODO: 
-#else
   if(s->poll_in != NULL){
     if(s->poll_out == s->poll_in)
       s->poll_out = NULL;
@@ -721,7 +835,7 @@ void ssh_socket_set_fd(ssh_socket s, socket_t fd) {
 #ifdef HAVE_DISPATCH_H
     IO *io = (__bridge IO*)s->io;
     s->state = SSH_SOCKET_CONNECTING;
-    [io setupWithFD:fd];
+   // [io setupWithFD:fd];
 #else
 
     if (s->poll_in) {
@@ -1109,11 +1223,17 @@ int ssh_socket_connect(ssh_socket s, const char *host, int port, const char *bin
 				"ssh_socket_connect called on socket not unconnected");
 		return SSH_ERROR;
 	}
+
+#ifdef HAVE_DISPATCH_H
+    IO *io = (__bridge IO*)s->io;
+    return [io connectToHost:@(host) andPort:port];
+#else
 	fd=ssh_connect_host_nonblocking(s->session,host,bind_addr,port);
 	SSH_LOG(SSH_LOG_PROTOCOL,"Nonblocking connection socket: %d",fd);
 	if(fd == SSH_INVALID_SOCKET)
 		return SSH_ERROR;
 	ssh_socket_set_fd(s,fd);
+#endif
 
 	return SSH_OK;
 }
@@ -1177,14 +1297,23 @@ int ssh_socket_connect_proxycommand(ssh_socket s, const char *command){
         ssh_execute_command(command,out_pipe[0],in_pipe[1]);
       }
   }
-//  close(in_pipe[1]);
-//  close(out_pipe[0]);
+#ifndef HAVE_DISPATCH_H
+  close(in_pipe[1]);
+  close(out_pipe[0]);
+#endif
   SSH_LOG(SSH_LOG_PROTOCOL,"ProxyCommand connection pipe: [%d,%d]",in_pipe[0],out_pipe[1]);
+#ifdef HAVE_DISPATCH_H
+  IO *io = (__bridge IO*)s->io;
+  s->state=SSH_SOCKET_CONNECTED;
+  s->fd_is_socket=0;
+  s->fd_in = in_pipe[0];
+  s->fd_out = out_pipe[1];
+  [io connectedWithInFd:in_pipe[0] fdOut:out_pipe[1]];
+#else
   ssh_socket_set_fd_in(s,in_pipe[0]);
   ssh_socket_set_fd_out(s,out_pipe[1]);
   s->state=SSH_SOCKET_CONNECTED;
   s->fd_is_socket=0;
-#ifndef HAVE_DISPATCH_H
   /* POLLOUT is the event to wait for in a nonblocking connect */
   ssh_poll_set_events(ssh_socket_get_poll_handle_in(s),POLLIN);
   ssh_poll_set_events(ssh_socket_get_poll_handle_out(s),POLLOUT);
