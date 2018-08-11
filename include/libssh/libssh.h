@@ -637,6 +637,12 @@ LIBSSH_API int ssh_pki_export_privkey_file(const ssh_key privkey,
                                            void *auth_data,
                                            const char *filename);
 
+LIBSSH_API int ssh_pki_export_privkey_blob(const ssh_key privkey,
+                                           const char *passphrase,
+                                           ssh_auth_callback auth_fn,
+                                           void *auth_data,
+                                           ssh_string *blob);
+
 LIBSSH_API int ssh_pki_copy_cert_to_privkey(const ssh_key cert_key,
                                             ssh_key privkey);
 

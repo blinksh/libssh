@@ -615,6 +615,37 @@ int ssh_pki_export_privkey_file(const ssh_key privkey,
     return SSH_OK;
 }
 
+int ssh_pki_export_privkey_blob(const ssh_key privkey,
+                                const char *passphrase,
+                                ssh_auth_callback auth_fn,
+                                void *auth_data,
+                                ssh_string *blob)
+{
+    int rc;
+
+    if (privkey == NULL || !ssh_key_is_private(privkey)) {
+        return SSH_ERROR;
+    }
+
+
+    if (privkey->type == SSH_KEYTYPE_ED25519){
+        *blob = ssh_pki_openssh_privkey_export(privkey,
+                                              passphrase,
+                                              auth_fn,
+                                              auth_data);
+    } else {
+        *blob = pki_private_key_to_pem(privkey,
+                                      passphrase,
+                                      auth_fn,
+                                      auth_data);
+    }
+    if (*blob == NULL) {
+        return -1;
+    }
+
+    return SSH_OK;
+}
+
 /* temporary function to migrate seemlessly to ssh_key */
 ssh_public_key ssh_pki_convert_key_to_publickey(const ssh_key key) {
     ssh_public_key pub;
