@@ -766,7 +766,7 @@ const char *ssh_copyright(void) {
 }
 
 #ifdef LIBSSH_HAVE_DISPATCH
-int ssh_send_keepalive(ssh_session session)
+int ssh_client_send_keepalive(ssh_session session)
 {
   int rc;
 

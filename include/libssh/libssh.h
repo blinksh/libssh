@@ -783,7 +783,7 @@ LIBSSH_API uint32_t ssh_buffer_get_len(ssh_buffer buffer);
 
 #ifdef LIBSSH_HAVE_DISPATCH
   LIBSSH_API long ssh_session_wait(ssh_session session, dispatch_time_t time);
-  int ssh_send_keepalive(ssh_session session);
+  int ssh_client_send_keepalive(ssh_session session);
 #endif
 
 
