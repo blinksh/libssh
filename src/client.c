@@ -764,6 +764,36 @@ const char *ssh_copyright(void) {
            "Distributed under the LGPL, please refer to COPYING "
            "file for information about your rights";
 }
+
+#ifdef LIBSSH_HAVE_DISPATCH
+int ssh_send_keepalive(ssh_session session)
+{
+  int rc;
+
+  rc = ssh_buffer_pack(session->out_buffer,
+                       "bsb",
+                       SSH2_MSG_GLOBAL_REQUEST,
+                       "keepalive@openssh.com",
+                       1);
+  if (rc != SSH_OK) {
+    goto err;
+  }
+
+  if (ssh_packet_send(session) == SSH_ERROR) {
+    goto err;
+  }
+
+  ssh_handle_packets(session, SSH_TIMEOUT_NONBLOCKING);
+
+  SSH_LOG(SSH_LOG_PACKET, "Sent a keepalive");
+  return SSH_OK;
+
+err:
+  ssh_set_error_oom(session);
+  ssh_buffer_reinit(session->out_buffer);
+  return SSH_ERROR;
+}
+#endif
 /** @} */
 
 /* vim: set ts=4 sw=4 et cindent: */
