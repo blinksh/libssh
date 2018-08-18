@@ -301,6 +301,12 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
     case NSStreamEventHasSpaceAvailable:
       [self _writeout];
       return;
+    case NSStreamEventErrorOccurred:
+        if (s->callbacks && s->callbacks->exception) {
+            s->callbacks->exception(SSH_SOCKET_EXCEPTION_ERROR,
+                                    s->last_errno, s->callbacks->userdata);
+        }
+      return;
     default:
       NSLog(@"Blink: Unknown output event (%lu)", (unsigned long)eventCode);
       return;
