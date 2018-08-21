@@ -246,12 +246,10 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
   if (stream == _inputStream) {
       switch (eventCode) {
           case NSStreamEventErrorOccurred:
-              if (s->state == SSH_SOCKET_CONNECTED) {
-                // Exception for incoming messages.
-                if (s->callbacks && s->callbacks->exception) {
-                    s->callbacks->exception(SSH_SOCKET_EXCEPTION_ERROR,
-                                            s->last_errno, s->callbacks->userdata);
-                    }
+              // Exception for incoming messages.
+              if (s->callbacks && s->callbacks->exception) {
+                s->callbacks->exception(SSH_SOCKET_EXCEPTION_ERROR,
+                                        s->last_errno, s->callbacks->userdata);
               }
               return;
           case NSStreamEventEndEncountered:
