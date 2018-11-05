@@ -1,5 +1,4 @@
 if (UNIX AND NOT WIN32)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fobjc-arc")
     # Activate with: -DCMAKE_BUILD_TYPE=Profiling
     set(CMAKE_C_FLAGS_PROFILING "-g -O0 -fprofile-arcs -ftest-coverage"
         CACHE STRING "Flags used by the C compiler during PROFILING builds.")
@@ -24,3 +23,9 @@ if (UNIX AND NOT WIN32)
     set(CMAKE_EXEC_LINKER_FLAGS_ADDRESSSANITIZER "-fsanitize=address"
         CACHE STRING "Flags used by the linker during ADDRESSSANITIZER builds.")
 endif()
+
+if (OSX)
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-deprecated-declarations")
+endif (OSX)
+
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fobjc-arc")
