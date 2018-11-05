@@ -406,7 +406,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
     }
     NSInteger size = _in_data.length;
     // TODO: loop ranges
-    const void * buffer = _in_data.bytes;
+    const char * buffer = (char *) _in_data.bytes;
     if (size == 0) {
         return;
     }
