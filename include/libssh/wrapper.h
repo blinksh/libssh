@@ -27,6 +27,13 @@
 #include "libssh/libgcrypt.h"
 #include "libssh/libmbedcrypto.h"
 
+enum ssh_digest_e {
+    SSH_DIGEST_AUTO=0,
+    SSH_DIGEST_SHA1=1,
+    SSH_DIGEST_SHA256,
+    SSH_DIGEST_SHA512
+};
+
 enum ssh_mac_e {
   SSH_MAC_SHA1=1,
   SSH_MAC_SHA256,
@@ -39,7 +46,8 @@ enum ssh_hmac_e {
   SSH_HMAC_SHA256,
   SSH_HMAC_SHA384,
   SSH_HMAC_SHA512,
-  SSH_HMAC_MD5
+  SSH_HMAC_MD5,
+  SSH_HMAC_AEAD_POLY1305
 };
 
 enum ssh_des_e {
@@ -51,6 +59,8 @@ struct ssh_hmac_struct {
   const char* name;
   enum ssh_hmac_e hmac_type;
 };
+
+struct ssh_cipher_struct;
 
 typedef struct ssh_mac_ctx_struct *ssh_mac_ctx;
 MD5CTX md5_init(void);
@@ -91,15 +101,18 @@ void hmac_update(HMACCTX c, const void *data, unsigned long len);
 void hmac_final(HMACCTX ctx,unsigned char *hashmacbuf,unsigned int *len);
 size_t hmac_digest_len(enum ssh_hmac_e type);
 
-int crypt_set_algorithms(ssh_session session, enum ssh_des_e des_type);
+int crypt_set_algorithms_client(ssh_session session);
 int crypt_set_algorithms_server(ssh_session session);
 struct ssh_crypto_struct *crypto_new(void);
 void crypto_free(struct ssh_crypto_struct *crypto);
 
 void ssh_reseed(void);
+int ssh_crypto_init(void);
+void ssh_crypto_finalize(void);
 
 void ssh_cipher_clear(struct ssh_cipher_struct *cipher);
 struct ssh_hmac_struct *ssh_get_hmactab(void);
+struct ssh_cipher_struct *ssh_get_ciphertab(void);
 const char *ssh_hmac_type_to_string(enum ssh_hmac_e hmac_type);
 
 #endif /* WRAPPER_H_ */

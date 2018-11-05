@@ -44,8 +44,16 @@
 # endif
 #endif /* !defined(HAVE_STRTOULL) */
 
+#if !defined(HAVE_STRNDUP)
+char *strndup(const char *s, size_t n);
+#endif /* ! HAVE_STRNDUP */
+
 #ifdef HAVE_BYTESWAP_H
 #include <byteswap.h>
+#endif
+
+#ifdef HAVE_ARPA_INET_H
+#include <arpa/inet.h>
 #endif
 
 #ifndef bswap_32
@@ -146,12 +154,11 @@ int gettimeofday(struct timeval *__p, void *__t);
 #ifndef ERROR_BUFFERLEN
 #define ERROR_BUFFERLEN 1024
 #endif
-#ifndef CLIENTBANNER1
-#define CLIENTBANNER1 "SSH-1.5-libssh_" SSH_STRINGIFY(LIBSSH_VERSION)
-#endif
-#ifndef CLIENTBANNER2
-#define CLIENTBANNER2 "SSH-2.0-libssh_" SSH_STRINGIFY(LIBSSH_VERSION)
-#endif
+
+#ifndef CLIENT_BANNER_SSH2
+#define CLIENT_BANNER_SSH2 "SSH-2.0-libssh_" SSH_STRINGIFY(LIBSSH_VERSION)
+#endif /* CLIENT_BANNER_SSH2 */
+
 #ifndef KBDINT_MAX_PROMPT
 #define KBDINT_MAX_PROMPT 256 /* more than openssh's :) */
 #endif
@@ -229,6 +236,7 @@ void _ssh_set_error_oom(void *error, const char *function);
     _ssh_set_error_invalid(error, __func__)
 void _ssh_set_error_invalid(void *error, const char *function);
 
+void ssh_reset_error(void *error);
 
 /* server.c */
 #ifdef WITH_SERVER
@@ -254,6 +262,8 @@ int compress_buffer(ssh_session session,ssh_buffer buf);
 int decompress_buffer(ssh_session session,ssh_buffer buf, size_t maxlen);
 
 /* match.c */
+int match_pattern_list(const char *string, const char *pattern,
+    unsigned int len, int dolower);
 int match_hostname(const char *host, const char *pattern, unsigned int len);
 
 /* connector.c */
@@ -371,4 +381,3 @@ void explicit_bzero(void *s, size_t n);
 void ssh_agent_state_free(void *data);
 
 #endif /* _LIBSSH_PRIV_H */
-/* vim: set ts=4 sw=4 et cindent: */

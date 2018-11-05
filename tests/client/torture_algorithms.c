@@ -26,6 +26,7 @@
 #include "torture.h"
 #include "libssh/libssh.h"
 #include "libssh/priv.h"
+#include "libssh/session.h"
 
 #include <errno.h>
 #include <sys/types.h>
@@ -49,7 +50,6 @@ static int session_setup(void **state) {
     int verbosity = torture_libssh_verbosity();
     struct passwd *pwd;
     int rc;
-
     pwd = getpwnam("bob");
     assert_non_null(pwd);
 
@@ -80,31 +80,48 @@ static void test_algorithm(ssh_session session,
                            const char *cipher,
                            const char *hmac) {
     int rc;
+    char data[256];
+    size_t len_to_test[] = {
+        1, 2, 3, 4, 5, 6, 7, 8, 10,
+        12, 15, 16, 20,
+        31, 32, 33,
+        63, 64, 65,
+        100, 127, 128
+    };
+    unsigned int i;
 
     int verbosity = torture_libssh_verbosity();
     ssh_options_set(session, SSH_OPTIONS_LOG_VERBOSITY, &verbosity);
 
     if (kex != NULL) {
         rc = ssh_options_set(session, SSH_OPTIONS_KEY_EXCHANGE, kex);
-        assert_int_equal(rc, SSH_OK);
+        assert_ssh_return_code(session, rc);
     }
 
     if (cipher != NULL) {
         rc = ssh_options_set(session, SSH_OPTIONS_CIPHERS_C_S, cipher);
-        assert_int_equal(rc, SSH_OK);
+        assert_ssh_return_code(session, rc);
         rc = ssh_options_set(session, SSH_OPTIONS_CIPHERS_S_C, cipher);
-        assert_int_equal(rc, SSH_OK);
+        assert_ssh_return_code(session, rc);
     }
 
     if (hmac != NULL) {
         rc = ssh_options_set(session, SSH_OPTIONS_HMAC_C_S, hmac);
-        assert_int_equal(rc, SSH_OK);
+        assert_ssh_return_code(session, rc);
         rc = ssh_options_set(session, SSH_OPTIONS_HMAC_S_C, hmac);
-        assert_int_equal(rc, SSH_OK);
+        assert_ssh_return_code(session, rc);
     }
 
     rc = ssh_connect(session);
-    assert_int_equal(rc, SSH_OK);
+    assert_ssh_return_code(session, rc);
+
+    /* send ignore packets of all sizes */
+    memset(data, 0, sizeof(data));
+    for (i = 0; i < (sizeof(len_to_test) / sizeof(size_t)); i++) {
+        memset(data, 'A', len_to_test[i]);
+        ssh_send_ignore(session, data);
+        ssh_handle_packets(session, 50);
+    }
 
     rc = ssh_userauth_none(session, NULL);
     if (rc != SSH_OK) {
@@ -261,6 +278,16 @@ static void torture_algorithms_blowfish_cbc_hmac_sha2_512(void **state) {
 }
 #endif
 
+static void torture_algorithms_chacha20_poly1305(void **state)
+{
+    struct torture_state *s = *state;
+
+    test_algorithm(s->ssh.session,
+                   NULL, /*kex*/
+                   "chacha20-poly1305@openssh.com",
+                   NULL);
+}
+
 static void torture_algorithms_zlib(void **state) {
     struct torture_state *s = *state;
     ssh_session session = s->ssh.session;
@@ -358,6 +385,22 @@ static void torture_algorithms_ecdh_sha2_nistp521(void **state) {
 }
 #endif
 
+#if ((OPENSSH_VERSION_MAJOR == 7 && OPENSSH_VERSION_MINOR >= 3) || OPENSSH_VERSION_MAJOR > 7)
+static void torture_algorithms_ecdh_curve25519_sha256(void **state) {
+    struct torture_state *s = *state;
+
+    test_algorithm(s->ssh.session, "curve25519-sha256", NULL/*cipher*/, NULL/*hmac*/);
+}
+#endif
+
+#if ((OPENSSH_VERSION_MAJOR == 6 && OPENSSH_VERSION_MINOR >= 5) || OPENSSH_VERSION_MAJOR > 6)
+static void torture_algorithms_ecdh_curve25519_sha256_libssh_org(void **state) {
+    struct torture_state *s = *state;
+
+    test_algorithm(s->ssh.session, "curve25519-sha256@libssh.org", NULL/*cipher*/, NULL/*hmac*/);
+}
+#endif
+
 static void torture_algorithms_dh_group1(void **state) {
     struct torture_state *s = *state;
 
@@ -441,6 +484,9 @@ int torture_run_tests(void) {
                                         session_setup,
                                         session_teardown),
 #endif
+        cmocka_unit_test_setup_teardown(torture_algorithms_chacha20_poly1305,
+                                        session_setup,
+                                        session_teardown),
         cmocka_unit_test_setup_teardown(torture_algorithms_zlib,
                                         session_setup,
                                         session_teardown),
@@ -450,6 +496,16 @@ int torture_run_tests(void) {
         cmocka_unit_test_setup_teardown(torture_algorithms_dh_group1,
                                         session_setup,
                                         session_teardown),
+#if ((OPENSSH_VERSION_MAJOR == 7 && OPENSSH_VERSION_MINOR >= 3) || OPENSSH_VERSION_MAJOR > 7)
+        cmocka_unit_test_setup_teardown(torture_algorithms_ecdh_curve25519_sha256,
+                                        session_setup,
+                                        session_teardown),
+#endif
+#if ((OPENSSH_VERSION_MAJOR == 6 && OPENSSH_VERSION_MINOR >= 5) || OPENSSH_VERSION_MAJOR > 6)
+        cmocka_unit_test_setup_teardown(torture_algorithms_ecdh_curve25519_sha256_libssh_org,
+                                        session_setup,
+                                        session_teardown),
+#endif
 #if defined(HAVE_ECC)
         cmocka_unit_test_setup_teardown(torture_algorithms_ecdh_sha2_nistp256,
                                         session_setup,

@@ -87,8 +87,8 @@
 
 /* libssh version */
 #define LIBSSH_VERSION_MAJOR  0
-#define LIBSSH_VERSION_MINOR  7
-#define LIBSSH_VERSION_MICRO  90
+#define LIBSSH_VERSION_MINOR  8
+#define LIBSSH_VERSION_MICRO  3
 
 #define LIBSSH_VERSION_INT SSH_VERSION_INT(LIBSSH_VERSION_MAJOR, \
                                            LIBSSH_VERSION_MINOR, \
@@ -248,11 +248,39 @@ enum ssh_server_known_e {
 };
 
 enum ssh_known_hosts_e {
+    /**
+     * There had been an error checking the host.
+     */
     SSH_KNOWN_HOSTS_ERROR = -2,
+
+    /**
+     * The known host file does not exist. The host is thus unknown. File will
+     * be created if host key is accepted.
+     */
     SSH_KNOWN_HOSTS_NOT_FOUND = -1,
+
+    /**
+     * The server is unknown. User should confirm the public key hash is
+     * correct.
+     */
     SSH_KNOWN_HOSTS_UNKNOWN = 0,
+
+    /**
+     * The server is known and has not changed.
+     */
     SSH_KNOWN_HOSTS_OK,
+
+    /**
+     * The server key has changed. Either you are under attack or the
+     * administrator changed the key. You HAVE to warn the user about a
+     * possible attack.
+     */
     SSH_KNOWN_HOSTS_CHANGED,
+
+    /**
+     * The server gave use a key of a type while we had an other type recorded.
+     * It is a possible attack.
+     */
     SSH_KNOWN_HOSTS_OTHER,
 };
 
@@ -385,6 +413,7 @@ enum ssh_options_e {
   SSH_OPTIONS_GSSAPI_AUTH,
   SSH_OPTIONS_GLOBAL_KNOWNHOSTS,
   SSH_OPTIONS_NODELAY,
+  SSH_OPTIONS_PUBLICKEY_ACCEPTED_TYPES,
 };
 
 enum {
@@ -509,7 +538,8 @@ LIBSSH_API int ssh_get_server_publickey(ssh_session session, ssh_key *key);
 
 enum ssh_publickey_hash_type {
     SSH_PUBLICKEY_HASH_SHA1,
-    SSH_PUBLICKEY_HASH_MD5
+    SSH_PUBLICKEY_HASH_MD5,
+    SSH_PUBLICKEY_HASH_SHA256
 };
 LIBSSH_API int ssh_get_publickey_hash(const ssh_key key,
                                       enum ssh_publickey_hash_type type,
@@ -626,6 +656,11 @@ LIBSSH_API int ssh_pki_import_privkey_base64(const char *b64_key,
                                              ssh_auth_callback auth_fn,
                                              void *auth_data,
                                              ssh_key *pkey);
+LIBSSH_API int ssh_pki_export_privkey_base64(const ssh_key privkey,
+                                             const char *passphrase,
+                                             ssh_auth_callback auth_fn,
+                                             void *auth_data,
+                                             char **b64_key);
 LIBSSH_API int ssh_pki_import_privkey_file(const char *filename,
                                            const char *passphrase,
                                            ssh_auth_callback auth_fn,
@@ -667,6 +702,10 @@ LIBSSH_API int ssh_pki_export_pubkey_file(const ssh_key key,
 
 LIBSSH_API const char *ssh_pki_key_ecdsa_name(const ssh_key key);
 
+LIBSSH_API char *ssh_get_fingerprint_hash(enum ssh_publickey_hash_type type,
+                                          unsigned char *hash,
+                                          size_t len);
+LIBSSH_API void ssh_print_hash(enum ssh_publickey_hash_type type, unsigned char *hash, size_t len);
 LIBSSH_API void ssh_print_hexa(const char *descr, const unsigned char *what, size_t len);
 LIBSSH_API int ssh_send_ignore (ssh_session session, const char *data);
 LIBSSH_API int ssh_send_debug (ssh_session session, const char *message, int always_display);
@@ -741,12 +780,16 @@ LIBSSH_API void ssh_string_burn(ssh_string str);
 LIBSSH_API ssh_string ssh_string_copy(ssh_string str);
 LIBSSH_API void *ssh_string_data(ssh_string str);
 LIBSSH_API int ssh_string_fill(ssh_string str, const void *data, size_t len);
+#define SSH_STRING_FREE(x) \
+    do { if ((x) != NULL) { ssh_string_free(x); x = NULL; } } while(0)
 LIBSSH_API void ssh_string_free(ssh_string str);
 LIBSSH_API ssh_string ssh_string_from_char(const char *what);
 LIBSSH_API size_t ssh_string_len(ssh_string str);
 LIBSSH_API ssh_string ssh_string_new(size_t size);
 LIBSSH_API const char *ssh_string_get_char(ssh_string str);
 LIBSSH_API char *ssh_string_to_char(ssh_string str);
+#define SSH_STRING_FREE_CHAR(x) \
+    do { if ((x) != NULL) { ssh_string_free_char(x); x = NULL; } } while(0)
 LIBSSH_API void ssh_string_free_char(char *s);
 
 LIBSSH_API int ssh_getpass(const char *prompt, char *buf, size_t len, int echo,
@@ -775,6 +818,8 @@ LIBSSH_API const char* ssh_get_hmac_out(ssh_session session);
 
 LIBSSH_API ssh_buffer ssh_buffer_new(void);
 LIBSSH_API void ssh_buffer_free(ssh_buffer buffer);
+#define SSH_BUFFER_FREE(x) \
+    do { if ((x) != NULL) { ssh_buffer_free(x); x = NULL; } } while(0)
 LIBSSH_API int ssh_buffer_reinit(ssh_buffer buffer);
 LIBSSH_API int ssh_buffer_add_data(ssh_buffer buffer, const void *data, uint32_t len);
 LIBSSH_API uint32_t ssh_buffer_get_data(ssh_buffer buffer, void *data, uint32_t requestedlen);
@@ -795,4 +840,3 @@ LIBSSH_API uint32_t ssh_buffer_get_len(ssh_buffer buffer);
 }
 #endif
 #endif /* _LIBSSH_H */
-/* vim: set ts=2 sw=2 et cindent: */

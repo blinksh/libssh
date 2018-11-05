@@ -1337,5 +1337,3 @@ int ssh_socket_dispatch_wait(ssh_socket s, int milliseconds) {
 
 #endif /* _WIN32 */
 /** @} */
-
-/* vim: set ts=4 sw=4 et cindent: */

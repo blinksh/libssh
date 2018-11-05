@@ -78,7 +78,12 @@ int ssh_mbedcry_rand(bignum rnd, int bits, int top, int bottom);
 int ssh_mbedcry_is_bit_set(bignum num, size_t pos);
 
 #define bignum_new() ssh_mbedcry_bn_new()
-#define bignum_free(num) ssh_mbedcry_bn_free(num);
+#define bignum_safe_free(num) do { \
+    if ((num) != NULL) { \
+        ssh_mbedcry_bn_free(num); \
+        (num)=NULL; \
+    } \
+    } while(0)
 #define bignum_set_word(bn, n) mbedtls_mpi_lset(bn, n) /* TODO fix
                                                           overflow/underflow */
 #define bignum_bin2bn(data, datalen, bn) mbedtls_mpi_read_binary(bn, data, \
@@ -86,8 +91,7 @@ int ssh_mbedcry_is_bit_set(bignum num, size_t pos);
 #define bignum_bn2dec(num) ssh_mbedcry_bn2num(num, 10)
 #define bignum_dec2bn(data, bn) mbedtls_mpi_read_string(bn, 10, data)
 #define bignum_bn2hex(num) ssh_mbedcry_bn2num(num, 16)
-#define bignum_rand(rnd, bits, top, bottom) ssh_mbedcry_rand(rnd, bits, \
-        top, bottom)
+#define bignum_rand(rnd, bits) ssh_mbedcry_rand((rnd), (bits), 0, 1)
 #define bignum_mod_exp(dest, generator, exp, modulo, ctx) \
         mbedtls_mpi_exp_mod(dest, generator, exp, modulo, NULL)
 #define bignum_num_bytes(num) mbedtls_mpi_size(num)
@@ -97,11 +101,8 @@ int ssh_mbedcry_is_bit_set(bignum num, size_t pos);
         mbedtls_mpi_size(num))
 #define bignum_cmp(num1, num2) mbedtls_mpi_cmp_mpi(num1, num2)
 
-mbedtls_entropy_context ssh_mbedtls_entropy;
-mbedtls_ctr_drbg_context ssh_mbedtls_ctr_drbg;
+mbedtls_ctr_drbg_context *ssh_get_mbedtls_ctr_drbg_context(void);
 
-void ssh_mbedtls_init(void);
-void ssh_mbedtls_cleanup(void);
 int ssh_mbedtls_random(void *where, int len, int strong);
 
 ssh_string make_ecpoint_string(const mbedtls_ecp_group *g, const

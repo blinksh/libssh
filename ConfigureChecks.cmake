@@ -4,11 +4,11 @@ include(CheckSymbolExists)
 include(CheckFunctionExists)
 include(CheckLibraryExists)
 include(CheckTypeSize)
-include(CheckCXXSourceCompiles)
+include(CheckStructHasMember)
 include(TestBigEndian)
 
-set(PACKAGE ${APPLICATION_NAME})
-set(VERSION ${APPLICATION_VERSION})
+set(PACKAGE ${PROJECT_NAME})
+set(VERSION ${PROJECT_VERSION})
 set(DATADIR ${DATA_INSTALL_DIR})
 set(LIBDIR ${LIB_INSTALL_DIR})
 set(PLUGINDIR "${PLUGIN_INSTALL_DIR}-${LIBRARY_SOVERSION}")
@@ -42,20 +42,20 @@ if(CMAKE_COMPILER_IS_GNUCC AND NOT MINGW AND NOT OS2)
 "void __attribute__((visibility(\"default\"))) test() {}
 int main(void){ return 0; }
 " WITH_VISIBILITY_HIDDEN)
-        set(CMAKE_REQUIRED_FLAGS "")
+        unset(CMAKE_REQUIRED_FLAGS)
     endif (NOT GNUCC_VERSION EQUAL 34)
 endif(CMAKE_COMPILER_IS_GNUCC AND NOT MINGW AND NOT OS2)
 
 # HEADER FILES
-set(CMAKE_REQUIRED_INCLUDES_SAVE ${CMAKE_REQUIRED_INCLUDES})
 set(CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES} ${ARGP_INCLUDE_DIR})
 check_include_file(argp.h HAVE_ARGP_H)
-set(CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES_SAVE})
+unset(CMAKE_REQUIRED_INCLUDES)
 
 check_include_file(pty.h HAVE_PTY_H)
 check_include_file(utmp.h HAVE_UTMP_H)
 check_include_file(termios.h HAVE_TERMIOS_H)
 check_include_file(unistd.h HAVE_UNISTD_H)
+check_include_file(stdint.h HAVE_STDINT_H)
 check_include_file(util.h HAVE_UTIL_H)
 check_include_file(libutil.h HAVE_LIBUTIL_H)
 check_include_file(sys/time.h HAVE_SYS_TIME_H)
@@ -119,6 +119,13 @@ if (OPENSSL_FOUND)
     set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
     set(CMAKE_REQUIRED_LIBRARIES ${OPENSSL_CRYPTO_LIBRARY})
     check_function_exists(EVP_CIPHER_CTX_new HAVE_OPENSSL_EVP_CIPHER_CTX_NEW)
+
+    set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
+    set(CMAKE_REQUIRED_LIBRARIES ${OPENSSL_CRYPTO_LIBRARY})
+    check_function_exists(RAND_priv_bytes HAVE_OPENSSL_RAND_PRIV_BYTES)
+
+    unset(CMAKE_REQUIRED_INCLUDES)
+    unset(CMAKE_REQUIRED_LIBRARIES)
 endif()
 
 if (CMAKE_HAVE_PTHREAD_H)
@@ -137,18 +144,20 @@ endif ()
 
 if (NOT WITH_MBEDTLS)
     set(HAVE_DSA 1)
-endif()
+endif (NOT WITH_MBEDTLS)
 
 # FUNCTIONS
 
 check_function_exists(isblank HAVE_ISBLANK)
 check_function_exists(strncpy HAVE_STRNCPY)
+check_function_exists(strndup HAVE_STRNDUP)
 check_function_exists(strtoull HAVE_STRTOULL)
 check_function_exists(explicit_bzero HAVE_EXPLICIT_BZERO)
 check_function_exists(memset_s HAVE_MEMSET_S)
 
 if (HAVE_GLOB_H)
-  check_function_exists(glob HAVE_GLOB)
+    check_struct_has_member(glob_t gl_flags glob.h HAVE_GLOB_GL_FLAGS_MEMBER)
+    check_function_exists(glob HAVE_GLOB)
 endif (HAVE_GLOB_H)
 
 if (NOT WIN32)
@@ -183,7 +192,7 @@ if (WIN32)
         check_symbol_exists(poll "winsock2.h;ws2tcpip.h" HAVE_SELECT)
         # The getaddrinfo function is defined to the WspiapiGetAddrInfo inline function
         check_symbol_exists(getaddrinfo "winsock2.h;ws2tcpip.h" HAVE_GETADDRINFO)
-        set(CMAKE_REQUIRED_LIBRARIES)
+        unset(CMAKE_REQUIRED_LIBRARIES)
     endif (HAVE_WSPIAPI_H OR HAVE_WS2TCPIP_H)
 
     check_function_exists(_strtoui64 HAVE__STRTOUI64)
@@ -207,13 +216,13 @@ if (UNIX)
         check_library_exists(socket getaddrinfo "" HAVE_LIBSOCKET)
         if (HAVE_LIBSOCKET)
             set(HAVE_GETADDRINFO TRUE)
-            set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} socket)
+            set(_REQUIRED_LIBRARIES ${_REQUIRED_LIBRARIES} socket)
         endif (HAVE_LIBSOCKET)
 
         # libnsl/inet_pton (Solaris)
         check_library_exists(nsl inet_pton "" HAVE_LIBNSL)
         if (HAVE_LIBNSL)
-            set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} nsl)
+            set(_REQUIRED_LIBRARIES ${_REQUIRED_LIBRARIES} nsl)
         endif (HAVE_LIBNSL)
 
         # librt
@@ -222,7 +231,7 @@ if (UNIX)
 
     check_library_exists(rt clock_gettime "" HAVE_CLOCK_GETTIME)
     if (HAVE_LIBRT OR HAVE_CLOCK_GETTIME)
-        set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} rt)
+        set(_REQUIRED_LIBRARIES ${_REQUIRED_LIBRARIES} rt)
     endif (HAVE_LIBRT OR HAVE_CLOCK_GETTIME)
 
     check_library_exists(util forkpty "" HAVE_LIBUTIL)
@@ -230,7 +239,7 @@ if (UNIX)
     check_function_exists(__strtoull HAVE___STRTOULL)
 endif (UNIX)
 
-set(LIBSSH_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} CACHE INTERNAL "libssh required system libraries")
+set(LIBSSH_REQUIRED_LIBRARIES ${_REQUIRED_LIBRARIES} CACHE INTERNAL "libssh required system libraries")
 
 # LIBRARIES
 if (OPENSSL_FOUND)
@@ -269,25 +278,50 @@ int main(void) {
     return 0;
 }" HAVE_MSC_THREAD_LOCAL_STORAGE)
 
+###########################################################
+# For detecting attributes we need to treat warnings as
+# errors
+if (UNIX)
+    check_c_compiler_flag("-Werror" REQUIRED_FLAGS_WERROR)
+    if (REQUIRED_FLAGS_WERROR)
+        set(CMAKE_REQUIRED_FLAGS "-Werror")
+    endif()
+endif (UNIX)
+
+check_c_source_compiles("
+void test_constructor_attribute(void) __attribute__ ((constructor));
+
+void test_constructor_attribute(void)
+{
+    return;
+}
+
+int main(void) {
+    return 0;
+}" HAVE_CONSTRUCTOR_ATTRIBUTE)
+
+check_c_source_compiles("
+void test_destructor_attribute(void) __attribute__ ((destructor));
+
+void test_destructor_attribute(void)
+{
+    return;
+}
+
+int main(void) {
+    return 0;
+}" HAVE_DESTRUCTOR_ATTRIBUTE)
+
 check_c_source_compiles("
 #define FALL_THROUGH __attribute__((fallthrough))
 
-enum direction_e {
-    UP = 0,
-    DOWN,
-};
-
 int main(void) {
-    enum direction_e key = UP;
-    int i = 10;
-    int j = 0;
+    int i = 2;
 
-    switch (key) {
-    case UP:
-        i = 5;
+    switch (i) {
+    case 0:
         FALL_THROUGH;
-    case DOWN:
-        j = i * 2;
+    case 1:
         break;
     default:
         break;
@@ -334,6 +368,31 @@ int main(void) {
     return 0;
 }" HAVE_COMPILER__FUNCTION__)
 
+check_c_source_compiles("
+#define ARRAY_LEN 16
+void test_attr(const unsigned char *k)
+    __attribute__((__bounded__(__minbytes__, 2, 16)));
+
+int main(void) {
+    return 0;
+}" HAVE_GCC_BOUNDED_ATTRIBUTE)
+
+# Stop treating warnings as errors
+unset(CMAKE_REQUIRED_FLAGS)
+
+# Check for version script support
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/conftest.map" "VERS_1 {
+        global: sym;
+};
+VERS_2 {
+        global: sym;
+} VERS_1;
+")
+
+set(CMAKE_REQUIRED_FLAGS "-Wl,--version-script=\"${CMAKE_CURRENT_BINARY_DIR}/conftest.map\"")
+check_c_source_compiles("int main(void) { return 0; }" HAVE_LD_VERSION_SCRIPT)
+unset(CMAKE_REQUIRED_FLAGS)
+file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/conftest.map")
 
 if (WITH_DEBUG_CRYPTO)
   set(DEBUG_CRYPTO 1)

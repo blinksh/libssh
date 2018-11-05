@@ -44,40 +44,81 @@
 #include "libssh/crypto.h"
 #include "libssh/buffer.h"
 
-uint32_t ssh_packet_decrypt_len(ssh_session session, char *crypted){
-  uint32_t decrypted;
+/** @internal
+ * @brief decrypt the packet length from a raw encrypted packet, and store the first decrypted
+ * blocksize.
+ * @returns native byte-ordered decrypted length of the upcoming packet
+ */
+uint32_t ssh_packet_decrypt_len(ssh_session session,
+                                uint8_t *destination,
+                                uint8_t *source)
+{
+    uint32_t decrypted;
+    int rc;
 
-  if (session->current_crypto) {
-    if (ssh_packet_decrypt(session, crypted,
-          session->current_crypto->in_cipher->blocksize) < 0) {
-      return 0;
+    if (session->current_crypto != NULL) {
+        if (session->current_crypto->in_cipher->aead_decrypt_length != NULL) {
+            session->current_crypto->in_cipher->aead_decrypt_length(
+                    session->current_crypto->in_cipher, source, destination,
+                    session->current_crypto->in_cipher->lenfield_blocksize,
+                    session->recv_seq);
+        } else {
+            rc = ssh_packet_decrypt(
+                    session,
+                    destination,
+                    source,
+                    0,
+                    session->current_crypto->in_cipher->blocksize);
+            if (rc < 0) {
+                return 0;
+            }
+        }
+    } else {
+        memcpy(destination, source, 8);
     }
-  }
-  memcpy(&decrypted,crypted,sizeof(decrypted));
-  return ntohl(decrypted);
+    memcpy(&decrypted,destination,sizeof(decrypted));
+
+    return ntohl(decrypted);
 }
 
-int ssh_packet_decrypt(ssh_session session, void *data,uint32_t len) {
-  struct ssh_cipher_struct *crypto = session->current_crypto->in_cipher;
-  char *out = NULL;
+/** @internal
+ * @brief decrypts the content of an SSH packet.
+ * @param[source] source packet, including the encrypted length field
+ * @param[start] index in the packet that was not decrypted yet.
+ * @param[encrypted_size] size of the encrypted data to be decrypted after start.
+ */
+int ssh_packet_decrypt(ssh_session session,
+                       uint8_t *destination,
+                       uint8_t *source,
+                       size_t start,
+                       size_t encrypted_size)
+{
+    struct ssh_cipher_struct *crypto = session->current_crypto->in_cipher;
 
-  assert(len);
+    if (encrypted_size <= 0) {
+        return SSH_ERROR;
+    }
 
-  if(len % session->current_crypto->in_cipher->blocksize != 0){
-    ssh_set_error(session, SSH_FATAL, "Cryptographic functions must be set on at least one blocksize (received %d)",len);
-    return SSH_ERROR;
-  }
-  out = malloc(len);
-  if (out == NULL) {
-    return -1;
-  }
+    if (encrypted_size % session->current_crypto->in_cipher->blocksize != 0) {
+        ssh_set_error(session,
+                      SSH_FATAL,
+                      "Cryptographic functions must be used on multiple of "
+                      "blocksize (received %" PRIdS ")",
+                      encrypted_size);
+        return SSH_ERROR;
+    }
 
-  crypto->decrypt(crypto,data,out,len);
+    if (crypto->aead_decrypt != NULL) {
+        return crypto->aead_decrypt(crypto,
+                                    source,
+                                    destination,
+                                    encrypted_size,
+                                    session->recv_seq);
+    } else {
+        crypto->decrypt(crypto, source + start, destination, encrypted_size);
+    }
 
-  memcpy(data,out,len);
-  explicit_bzero(out, len);
-  SAFE_FREE(out);
-  return 0;
+    return 0;
 }
 
 unsigned char *ssh_packet_encrypt(ssh_session session, void *data, uint32_t len) {
@@ -93,7 +134,7 @@ unsigned char *ssh_packet_encrypt(ssh_session session, void *data, uint32_t len)
   if (!session->current_crypto) {
     return NULL; /* nothing to do here */
   }
-  if(len % session->current_crypto->in_cipher->blocksize != 0){
+  if((len - session->current_crypto->out_cipher->lenfield_blocksize) % session->current_crypto->out_cipher->blocksize != 0){
       ssh_set_error(session, SSH_FATAL, "Cryptographic functions must be set on at least one blocksize (received %d)",len);
       return NULL;
   }
@@ -106,35 +147,33 @@ unsigned char *ssh_packet_encrypt(ssh_session session, void *data, uint32_t len)
   seq = ntohl(session->send_seq);
   crypto = session->current_crypto->out_cipher;
 
-  if (session->version == 2) {
-    ctx = hmac_init(session->current_crypto->encryptMAC, hmac_digest_len(type), type);
-    if (ctx == NULL) {
-      SAFE_FREE(out);
-      return NULL;
-    }
-    hmac_update(ctx,(unsigned char *)&seq,sizeof(uint32_t));
-    hmac_update(ctx,data,len);
-    hmac_final(ctx,session->current_crypto->hmacbuf,&finallen);
+  if (crypto->aead_encrypt != NULL) {
+    crypto->aead_encrypt(crypto, data, out, len,
+            session->current_crypto->hmacbuf, session->send_seq);
+  } else {
+      ctx = hmac_init(session->current_crypto->encryptMAC, hmac_digest_len(type), type);
+      if (ctx == NULL) {
+        SAFE_FREE(out);
+        return NULL;
+      }
+      hmac_update(ctx,(unsigned char *)&seq,sizeof(uint32_t));
+      hmac_update(ctx,data,len);
+      hmac_final(ctx,session->current_crypto->hmacbuf,&finallen);
+
 #ifdef DEBUG_CRYPTO
-    ssh_print_hexa("mac: ",data,hmac_digest_len(type));
-    if (finallen != hmac_digest_len(type)) {
-      printf("Final len is %d\n",finallen);
-    }
-    ssh_print_hexa("Packet hmac", session->current_crypto->hmacbuf, hmac_digest_len(type));
+      ssh_print_hexa("mac: ",data,hmac_digest_len(type));
+      if (finallen != hmac_digest_len(type)) {
+        printf("Final len is %d\n",finallen);
+      }
+      ssh_print_hexa("Packet hmac", session->current_crypto->hmacbuf, hmac_digest_len(type));
 #endif
+      crypto->encrypt(crypto, data, out, len);
   }
-
-  crypto->encrypt(crypto, data, out, len);
-
   memcpy(data, out, len);
   explicit_bzero(out, len);
   SAFE_FREE(out);
 
-  if (session->version == 2) {
-    return session->current_crypto->hmacbuf;
-  }
-
-  return NULL;
+  return session->current_crypto->hmacbuf;
 }
 
 /**
@@ -149,12 +188,20 @@ unsigned char *ssh_packet_encrypt(ssh_session session, void *data, uint32_t len)
  * @return              0 if hmac and mac are equal, < 0 if not or an error
  *                      occurred.
  */
-int ssh_packet_hmac_verify(ssh_session session, ssh_buffer buffer,
-    unsigned char *mac, enum ssh_hmac_e type) {
+int ssh_packet_hmac_verify(ssh_session session,
+                           ssh_buffer buffer,
+                           uint8_t *mac,
+                           enum ssh_hmac_e type)
+{
   unsigned char hmacbuf[DIGEST_MAX_LEN] = {0};
   HMACCTX ctx;
   unsigned int len;
   uint32_t seq;
+
+  /* AEAD type have no mac checking */
+  if (type == SSH_HMAC_AEAD_POLY1305) {
+      return SSH_OK;
+  }
 
   ctx = hmac_init(session->current_crypto->decryptMAC, hmac_digest_len(type), type);
   if (ctx == NULL) {
@@ -178,5 +225,3 @@ int ssh_packet_hmac_verify(ssh_session session, ssh_buffer buffer,
 
   return -1;
 }
-
-/* vim: set ts=2 sw=2 et cindent: */

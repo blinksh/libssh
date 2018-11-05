@@ -39,11 +39,10 @@ static z_stream *initcompress(ssh_session session, int level) {
   z_stream *stream = NULL;
   int status;
 
-  stream = malloc(sizeof(z_stream));
+  stream = calloc(1, sizeof(z_stream));
   if (stream == NULL) {
     return NULL;
   }
-  memset(stream, 0, sizeof(z_stream));
 
   status = deflateInit(stream, level);
   if (status != Z_OK) {
@@ -128,11 +127,10 @@ static z_stream *initdecompress(ssh_session session) {
   z_stream *stream = NULL;
   int status;
 
-  stream = malloc(sizeof(z_stream));
+  stream = calloc(1, sizeof(z_stream));
   if (stream == NULL) {
     return NULL;
   }
-  memset(stream,0,sizeof(z_stream));
 
   status = inflateInit(stream);
   if (status != Z_OK) {
@@ -302,5 +300,3 @@ int decompress_buffer(ssh_session session, ssh_buffer buf, size_t maxlen) {
   free(buffer);
   return 0;
 }
-
-/* vim: set ts=2 sw=2 et cindent: */

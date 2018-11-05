@@ -22,21 +22,18 @@ set(TORTURE_LINK_LIBRARIES
     ${LIBSSH_STATIC_LIBRARY}
     ${LIBSSH_LINK_LIBRARIES})
 
-if (LIBSSH_THREADS)
-    set(TORTURE_LINK_LIBRARIES
-        ${TORTURE_LINK_LIBRARIES}
-        ${LIBSSH_THREADS_STATIC_LIBRARY}
-        ${LIBSSH_THREADS_LINK_LIBRARIES})
-endif (LIBSSH_THREADS)
-
 # create test library
 add_library(${TORTURE_LIBRARY}
             STATIC
                 cmdline.c
                 torture.c
                 torture_key.c
-                torture_pki.c)
+                torture_pki.c
+                torture_cmocka.c)
 target_link_libraries(${TORTURE_LIBRARY} ${TORTURE_LINK_LIBRARIES})
+target_compile_options(${TORTURE_LIBRARY} PRIVATE
+                       -DSSH_PING_EXECUTABLE="${CMAKE_CURRENT_BINARY_DIR}/ssh_ping"
+)
 
 if (ARGP_LIBRARY)
     target_link_libraries(${TORTURE_LIBRARY}
@@ -51,7 +48,7 @@ set(TEST_TARGET_LIBRARIES
 
 add_subdirectory(unittests)
 
-if (WITH_CLIENT_TESTING)
+if (CLIENT_TESTING)
     find_package(socket_wrapper 1.1.5 REQUIRED)
     find_package(nss_wrapper 1.1.2 REQUIRED)
     find_package(uid_wrapper 1.2.0 REQUIRED)
@@ -93,6 +90,11 @@ if (WITH_CLIENT_TESTING)
         chroot_wrapper
     )
 
+    # ssh_ping
+    add_executable(ssh_ping ssh_ping.c)
+    target_compile_options(ssh_ping PRIVATE ${DEFAULT_C_COMPILE_FLAGS})
+    target_link_libraries(ssh_ping ${LIBSSH_SHARED_LIBRARY})
+
     # homedir will be used in passwd
     set(HOMEDIR ${CMAKE_CURRENT_BINARY_DIR}/home)
 
@@ -117,9 +119,14 @@ if (WITH_CLIENT_TESTING)
     # Give bob some keys
     file(COPY keys/id_rsa DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
     file(COPY keys/id_rsa.pub DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
+    file(COPY keys/id_ecdsa DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
+    file(COPY keys/id_ecdsa.pub DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
 
     # Allow to auth with bob his public keys on alice account
     configure_file(keys/id_rsa.pub ${CMAKE_CURRENT_BINARY_DIR}/home/alice/.ssh/authorized_keys @ONLY)
+    # append ECDSA public key
+    file(READ keys/id_ecdsa.pub CONTENTS)
+    file(APPEND ${CMAKE_CURRENT_BINARY_DIR}/home/alice/.ssh/authorized_keys "${CONTENTS}")
 
     # Copy the signed key to an alternative directory in bob's homedir.
     file(COPY keys/certauth/id_rsa DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh_cert/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
@@ -129,15 +136,15 @@ if (WITH_CLIENT_TESTING)
     message(STATUS "TORTURE_ENVIRONMENT=${TORTURE_ENVIRONMENT}")
 
     add_subdirectory(client)
-endif (WITH_CLIENT_TESTING)
+endif (CLIENT_TESTING)
 
 if (WITH_BENCHMARKS)
     add_subdirectory(benchmarks)
 endif (WITH_BENCHMARKS)
 
-if (WITH_SERVER)
+if (WITH_SERVER AND SERVER_TESTING)
     add_subdirectory(pkd)
-endif (WITH_SERVER)
+endif (WITH_SERVER AND SERVER_TESTING)
 
 if (FUZZ_TESTING)
     add_subdirectory(fuzz)

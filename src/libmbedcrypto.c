@@ -30,14 +30,23 @@
 #ifdef HAVE_LIBMBEDCRYPTO
 #include <mbedtls/md.h>
 
+static mbedtls_entropy_context ssh_mbedtls_entropy;
+static mbedtls_ctr_drbg_context ssh_mbedtls_ctr_drbg;
+
 struct ssh_mac_ctx_struct {
     enum ssh_mac_e mac_type;
     mbedtls_md_context_t ctx;
 };
+static int libmbedcrypto_initialized = 0;
 
 void ssh_reseed(void)
 {
     mbedtls_ctr_drbg_reseed(&ssh_mbedtls_ctr_drbg, NULL, 0);
+}
+
+int ssh_get_random(void *where, int len, int strong)
+{
+    return ssh_mbedtls_random(where, len, strong);
 }
 
 SHACTX sha1_init(void)
@@ -163,7 +172,7 @@ void evp_update(EVPCTX ctx, const void *data, unsigned long len)
 void evp_final(EVPCTX ctx, unsigned char *md, unsigned int *mdlen)
 {
     *mdlen = mbedtls_md_get_size(ctx->md_info);
-    mbedtls_md_hmac_finish(ctx, md);
+    mbedtls_md_finish(ctx, md);
     mbedtls_md_free(ctx);
     SAFE_FREE(ctx);
 }
@@ -833,129 +842,6 @@ static void cipher_cleanup(struct ssh_cipher_struct *cipher)
     mbedtls_cipher_free(&cipher->decrypt_ctx);
 }
 
-static int des3_set_encrypt_key(struct ssh_cipher_struct *cipher, void *key,
-        void *IV)
-{
-    const mbedtls_cipher_info_t *cipher_info = NULL;
-    unsigned char *des3_key = NULL;
-    size_t des_key_size = 0;
-    int rc;
-
-    mbedtls_cipher_init(&cipher->encrypt_ctx);
-    cipher_info = mbedtls_cipher_info_from_type(cipher->type);
-
-    rc = mbedtls_cipher_setup(&cipher->encrypt_ctx, cipher_info);
-    if (rc != 0) {
-        SSH_LOG(SSH_LOG_WARNING, "mbedtls_cipher_setup failed");
-        goto error;
-    }
-
-    des3_key = malloc(cipher_info->key_bitlen / 8);
-    if (des3_key == NULL) {
-        SSH_LOG(SSH_LOG_WARNING, "error allocating memory for key");
-        goto error;
-    }
-
-    des_key_size = cipher_info->key_bitlen / (8 * 3);
-    memcpy(des3_key, key, des_key_size);
-    memcpy(des3_key + des_key_size, (unsigned char * )key + des_key_size,
-            des_key_size);
-    memcpy(des3_key + 2 * des_key_size,
-            (unsigned char *) key + 2 * des_key_size, des_key_size);
-
-    rc = mbedtls_cipher_setkey(&cipher->encrypt_ctx, des3_key,
-                               cipher_info->key_bitlen,
-                               MBEDTLS_ENCRYPT);
-    if (rc != 0) {
-        SSH_LOG(SSH_LOG_WARNING, "mbedtls_cipher_setkey failed");
-        goto error;
-    }
-
-    rc = mbedtls_cipher_set_iv(&cipher->encrypt_ctx, IV, cipher_info->iv_size);
-
-    if (rc != 0) {
-        SSH_LOG(SSH_LOG_WARNING, "mbedtls_cipher_set_iv failed");
-        goto error;
-    }
-
-    rc = mbedtls_cipher_reset(&cipher->encrypt_ctx);
-
-    if (rc != 0) {
-        SSH_LOG(SSH_LOG_WARNING, "mbedtls_cipher_reset failed");
-        goto error;
-    }
-
-    SAFE_FREE(des3_key);
-    return SSH_OK;
-error:
-    mbedtls_cipher_free(&cipher->encrypt_ctx);
-    SAFE_FREE(des3_key);
-    return SSH_ERROR;
-}
-
-static int des3_set_decrypt_key(struct ssh_cipher_struct *cipher, void *key,
-        void *IV)
-{
-    const mbedtls_cipher_info_t *cipher_info = NULL;
-    unsigned char *des3_key = NULL;
-    size_t des_key_size = 0;
-    int rc;
-
-    mbedtls_cipher_init(&cipher->decrypt_ctx);
-    cipher_info = mbedtls_cipher_info_from_type(cipher->type);
-
-    rc = mbedtls_cipher_setup(&cipher->decrypt_ctx, cipher_info);
-    if (rc != 0) {
-        SSH_LOG(SSH_LOG_WARNING, "mbedtls_cipher_setup failed");
-        goto error;
-    }
-
-    des3_key = malloc(cipher_info->key_bitlen / 8);
-    if (des3_key == NULL) {
-        SSH_LOG(SSH_LOG_WARNING, "error allocating memory for key");
-        goto error;
-    }
-
-    des_key_size = cipher_info->key_bitlen / (8 * 3);
-    memcpy(des3_key, key, des_key_size);
-    memcpy(des3_key + des_key_size, (unsigned char *) key + des_key_size,
-            des_key_size);
-    memcpy(des3_key + 2 * des_key_size,
-            (unsigned char *) key + 2 * des_key_size,
-            des_key_size);
-
-    rc = mbedtls_cipher_setkey(&cipher->decrypt_ctx, des3_key,
-                               cipher_info->key_bitlen,
-                               MBEDTLS_DECRYPT);
-    if (rc != 0) {
-        SSH_LOG(SSH_LOG_WARNING, "mbedtls_cipher_setkey failed");
-        goto error;
-    }
-
-    rc = mbedtls_cipher_set_iv(&cipher->decrypt_ctx, IV, cipher_info->iv_size);
-
-    if (rc != 0) {
-        SSH_LOG(SSH_LOG_WARNING, "mbedtls_cipher_set_iv failed");
-        goto error;
-    }
-
-    rc = mbedtls_cipher_reset(&cipher->decrypt_ctx);
-
-    if (rc != 0) {
-        SSH_LOG(SSH_LOG_WARNING, "mbedtls_cipher_reset failed");
-        goto error;
-    }
-
-    SAFE_FREE(des3_key);
-    return SSH_OK;
-error:
-    mbedtls_cipher_free(&cipher->decrypt_ctx);
-    if (des3_key != NULL) {
-        SAFE_FREE(des3_key);
-    }
-    return SSH_ERROR;
-}
-
 static struct ssh_cipher_struct ssh_ciphertab[] = {
     {
         .name = "blowfish-cbc",
@@ -1046,25 +932,7 @@ static struct ssh_cipher_struct ssh_ciphertab[] = {
         .cleanup = cipher_cleanup
     },
     {
-        .name = "3des-cbc-ssh1",
-        .blocksize = 8,
-        .keysize = 192,
-        .type = MBEDTLS_CIPHER_DES_CBC,
-        .set_encrypt_key = des3_set_encrypt_key,
-        .set_decrypt_key = des3_set_decrypt_key,
-        .encrypt = cipher_encrypt_cbc,
-        .decrypt = cipher_decrypt_cbc,
-        .cleanup = cipher_cleanup
-    },
-    {
-        .name = "des-cbc-ssh1",
-        .blocksize = 8,
-        .keysize = 64,
-        .type = MBEDTLS_CIPHER_DES_CBC,
-        .set_encrypt_key = cipher_set_encrypt_key_cbc,
-        .set_decrypt_key = cipher_set_decrypt_key_cbc,
-        .encrypt = cipher_encrypt_cbc,
-        .decrypt = cipher_decrypt_cbc,
+        .name = "chacha20-poly1305@openssh.com"
     },
     {
         .name = NULL,
@@ -1083,9 +951,14 @@ struct ssh_cipher_struct *ssh_get_ciphertab(void)
     return ssh_ciphertab;
 }
 
-void ssh_mbedtls_init(void)
+int ssh_crypto_init(void)
 {
+    size_t i;
     int rc;
+
+    if (libmbedcrypto_initialized) {
+        return SSH_OK;
+    }
 
     mbedtls_entropy_init(&ssh_mbedtls_entropy);
     mbedtls_ctr_drbg_init(&ssh_mbedtls_ctr_drbg);
@@ -1095,6 +968,22 @@ void ssh_mbedtls_init(void)
     if (rc != 0) {
         mbedtls_ctr_drbg_free(&ssh_mbedtls_ctr_drbg);
     }
+
+    for (i = 0; ssh_ciphertab[i].name != NULL; i++) {
+        int cmp;
+
+        cmp = strcmp(ssh_ciphertab[i].name, "chacha20-poly1305@openssh.com");
+        if (cmp == 0) {
+            memcpy(&ssh_ciphertab[i],
+                   ssh_get_chacha20poly1305_cipher(),
+                   sizeof(struct ssh_cipher_struct));
+            break;
+        }
+    }
+
+    libmbedcrypto_initialized = 1;
+
+    return SSH_OK;
 }
 
 int ssh_mbedtls_random(void *where, int len, int strong)
@@ -1113,10 +1002,21 @@ int ssh_mbedtls_random(void *where, int len, int strong)
     return !rc;
 }
 
-void ssh_mbedtls_cleanup(void)
+mbedtls_ctr_drbg_context *ssh_get_mbedtls_ctr_drbg_context(void)
 {
+    return &ssh_mbedtls_ctr_drbg;
+}
+
+void ssh_crypto_finalize(void)
+{
+    if (!libmbedcrypto_initialized) {
+        return;
+    }
+
     mbedtls_ctr_drbg_free(&ssh_mbedtls_ctr_drbg);
     mbedtls_entropy_free(&ssh_mbedtls_entropy);
+
+    libmbedcrypto_initialized = 0;
 }
 
 #endif /* HAVE_LIBMBEDCRYPTO */

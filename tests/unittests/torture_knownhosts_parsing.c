@@ -1,5 +1,7 @@
 #include "config.h"
 
+#include <sys/stat.h>
+
 #define LIBSSH_STATIC
 #include <libssh/priv.h>
 #include "torture.h"
@@ -20,13 +22,16 @@ static int setup_knownhosts_file(void **state)
     char *tmp_file = NULL;
     size_t nwritten;
     FILE *fp = NULL;
+    mode_t mask;
     int fd;
 
     tmp_file = strdup(TMP_FILE_NAME);
     assert_non_null(tmp_file);
     *state = tmp_file;
 
+    mask = umask(S_IRWXO | S_IRWXG);
     fd = mkstemp(tmp_file);
+    umask(mask);
     assert_return_code(fd, errno);
 
     fp = fdopen(fd, "w");
@@ -67,6 +72,7 @@ static int teardown_knownhosts_file(void **state)
     }
 
     unlink(tmp_file);
+    SAFE_FREE(tmp_file);
 
     return 0;
 }
@@ -224,6 +230,15 @@ static void torture_knownhosts_read_file(void **state)
         type = ssh_key_type(entry->publickey);
         assert_int_equal(type, SSH_KEYTYPE_ED25519);
     }
+
+    it = ssh_list_get_iterator(entry_list);
+    for (;it != NULL; it = it->next) {
+        struct ssh_knownhosts_entry *entry = NULL;
+
+        entry = ssh_iterator_value(struct ssh_knownhosts_entry *, it);
+        SSH_KNOWNHOSTS_ENTRY_FREE(entry);
+    }
+    ssh_list_free(entry_list);
 }
 
 static void torture_knownhosts_host_exists(void **state)
@@ -244,7 +259,7 @@ static void torture_knownhosts_host_exists(void **state)
 
     ssh_options_set(session, SSH_OPTIONS_HOST, "wurstbrot");
     found = ssh_session_has_known_hosts_entry(session);
-    assert_true(found == SSH_KNOWN_HOSTS_NOT_FOUND);
+    assert_true(found == SSH_KNOWN_HOSTS_UNKNOWN);
 
     ssh_free(session);
 }

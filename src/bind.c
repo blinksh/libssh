@@ -149,9 +149,10 @@ static int ssh_bind_import_keys(ssh_bind sshbind) {
 
   if (sshbind->ecdsakey == NULL &&
       sshbind->dsakey == NULL &&
-      sshbind->rsakey == NULL) {
+      sshbind->rsakey == NULL &&
+      sshbind->ed25519key == NULL) {
       ssh_set_error(sshbind, SSH_FATAL,
-                    "ECDSA, DSA, or RSA host key file must be set");
+                    "ECDSA, ED25519, DSA, or RSA host key file must be set");
       return SSH_ERROR;
   }
 
@@ -214,12 +215,32 @@ static int ssh_bind_import_keys(ssh_bind sshbind) {
           return SSH_ERROR;
       }
 
-      if (ssh_key_type(sshbind->rsa) != SSH_KEYTYPE_RSA &&
-          ssh_key_type(sshbind->rsa) != SSH_KEYTYPE_RSA1) {
+      if (ssh_key_type(sshbind->rsa) != SSH_KEYTYPE_RSA) {
           ssh_set_error(sshbind, SSH_FATAL,
                   "The RSA host key has the wrong type");
           ssh_key_free(sshbind->rsa);
           sshbind->rsa = NULL;
+          return SSH_ERROR;
+      }
+  }
+
+  if (sshbind->ed25519 == NULL && sshbind->ed25519key != NULL) {
+      rc = ssh_pki_import_privkey_file(sshbind->ed25519key,
+                                       NULL,
+                                       NULL,
+                                       NULL,
+                                       &sshbind->ed25519);
+      if (rc == SSH_ERROR || rc == SSH_EOF) {
+          ssh_set_error(sshbind, SSH_FATAL,
+                  "Failed to import private ED25519 host key");
+          return SSH_ERROR;
+      }
+
+      if (ssh_key_type(sshbind->ed25519) != SSH_KEYTYPE_ED25519) {
+          ssh_set_error(sshbind, SSH_FATAL,
+                  "The ED25519 host key has the wrong type");
+          ssh_key_free(sshbind->ed25519);
+          sshbind->ed25519 = NULL;
           return SSH_ERROR;
       }
   }
@@ -232,12 +253,10 @@ int ssh_bind_listen(ssh_bind sshbind) {
   socket_t fd;
   int rc;
 
-  if (ssh_init() < 0) {
-    ssh_set_error(sshbind, SSH_FATAL, "ssh_init() failed");
-    return -1;
-  }
-
-  if (sshbind->rsa == NULL && sshbind->dsa == NULL && sshbind->ecdsa == NULL) {
+  if (sshbind->rsa == NULL &&
+      sshbind->dsa == NULL &&
+      sshbind->ecdsa == NULL &&
+      sshbind->ed25519 == NULL) {
       rc = ssh_bind_import_keys(sshbind);
       if (rc != SSH_OK) {
           return SSH_ERROR;
@@ -256,6 +275,7 @@ int ssh_bind_listen(ssh_bind sshbind) {
           sshbind->dsa = NULL;
           ssh_key_free(sshbind->rsa);
           sshbind->rsa = NULL;
+          /* XXX should this clear also other structures that were allocated */
           return -1;
       }
 
@@ -268,6 +288,7 @@ int ssh_bind_listen(ssh_bind sshbind) {
           sshbind->dsa = NULL;
           ssh_key_free(sshbind->rsa);
           sshbind->rsa = NULL;
+          /* XXX should this clear also other structures that were allocated */
           return -1;
       }
 
@@ -394,7 +415,6 @@ int ssh_bind_accept_fd(ssh_bind sshbind, ssh_session session, socket_t fd){
     }
 
     session->server = 1;
-    session->version = 2;
 
     /* copy options */
     for (i = 0; i < 10; i++) {
@@ -436,7 +456,8 @@ int ssh_bind_accept_fd(ssh_bind sshbind, ssh_session session, socket_t fd){
      */
     if (sshbind->rsa == NULL &&
         sshbind->dsa == NULL &&
-        sshbind->ecdsa == NULL) {
+        sshbind->ecdsa == NULL &&
+        sshbind->ed25519 == NULL) {
         rc = ssh_bind_import_keys(sshbind);
         if (rc != SSH_OK) {
             return SSH_ERROR;

@@ -8,11 +8,14 @@
 #ifndef __PKD_DAEMON_H__
 #define __PKD_DAEMON_H__
 
+#include "config.h"
+
 enum pkd_hostkey_type_e {
     PKD_RSA,
 #ifdef HAVE_DSA
     PKD_DSA,
 #endif
+    PKD_ED25519,
     PKD_ECDSA
 };
 
@@ -30,6 +33,10 @@ struct pkd_daemon_args {
         const char *testname;
         const char *testmatch;
         unsigned int iterations;
+
+        struct {
+            const char *mkdtemp_str;
+        } socket_wrapper;
     } opts;
 };
 

@@ -36,18 +36,19 @@
 #include "libssh/string.h"
 #include "libssh/curve25519.h"
 #include "libssh/knownhosts.h"
+#include "libssh/misc.h"
 
 #ifdef HAVE_LIBGCRYPT
 # define BLOWFISH "blowfish-cbc,"
 # define AES "aes256-ctr,aes192-ctr,aes128-ctr,aes256-cbc,aes192-cbc,aes128-cbc,"
 # define DES "3des-cbc"
-# define DES_SUPPORTED "3des-cbc,des-cbc-ssh1"
+# define DES_SUPPORTED "3des-cbc"
 
 #elif defined HAVE_LIBMBEDCRYPTO
 # define BLOWFISH "blowfish-cbc,"
 # define AES "aes256-ctr,aes192-ctr,aes128-ctr,aes256-cbc,aes192-cbc,aes128-cbc,"
 # define DES "3des-cbc"
-# define DES_SUPPORTED "3des-cbc,des-cbc-ssh1"
+# define DES_SUPPORTED "3des-cbc"
 
 #elif defined(HAVE_LIBCRYPTO)
 
@@ -68,7 +69,7 @@
 # endif /* HAVE_OPENSSL_AES_H */
 
 # define DES "3des-cbc"
-# define DES_SUPPORTED "3des-cbc,des-cbc-ssh1"
+# define DES_SUPPORTED "3des-cbc"
 #endif /* HAVE_LIBCRYPTO */
 
 #ifdef WITH_ZLIB
@@ -78,30 +79,35 @@
 #endif
 
 #ifdef HAVE_CURVE25519
-#define CURVE25519 "curve25519-sha256@libssh.org,"
+#define CURVE25519 "curve25519-sha256,curve25519-sha256@libssh.org,"
 #else
 #define CURVE25519 ""
 #endif
 
 #ifdef HAVE_ECDH
 #define ECDH "ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521,"
-#define HOSTKEYS "ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,ssh-rsa,ssh-dss"
+#define PUBLIC_KEY_ALGORITHMS "ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,ssh-rsa,rsa-sha2-512,rsa-sha2-256,ssh-dss"
 #else
 #ifdef HAVE_DSA
-#define HOSTKEYS "ssh-ed25519,ssh-rsa,ssh-dss"
+#define PUBLIC_KEY_ALGORITHMS "ssh-ed25519,ssh-rsa,rsa-sha2-512,rsa-sha2-256,ssh-dss"
 #else
-#define HOSTKEYS "ssh-ed25519,ssh-rsa"
+#define PUBLIC_KEY_ALGORITHMS "ssh-ed25519,ssh-rsa,rsa-sha2-512,rsa-sha2-256"
 #endif
 #define ECDH ""
 #endif
 
-#define KEY_EXCHANGE CURVE25519 ECDH "diffie-hellman-group14-sha1,diffie-hellman-group1-sha1"
+#define CHACHA20 "chacha20-poly1305@openssh.com,"
+
+#define KEY_EXCHANGE CURVE25519 ECDH "diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,diffie-hellman-group14-sha1,diffie-hellman-group1-sha1"
 #define KEX_METHODS_SIZE 10
+
+/* RFC 8308 */
+#define KEX_EXTENSION_CLIENT "ext-info-c"
 
 /* NOTE: This is a fixed API and the index is defined by ssh_kex_types_e */
 static const char *default_methods[] = {
   KEY_EXCHANGE,
-  HOSTKEYS,
+  PUBLIC_KEY_ALGORITHMS,
   AES BLOWFISH DES,
   AES BLOWFISH DES,
   "hmac-sha2-256,hmac-sha2-512,hmac-sha1",
@@ -116,9 +122,9 @@ static const char *default_methods[] = {
 /* NOTE: This is a fixed API and the index is defined by ssh_kex_types_e */
 static const char *supported_methods[] = {
   KEY_EXCHANGE,
-  HOSTKEYS,
-  AES BLOWFISH DES_SUPPORTED,
-  AES BLOWFISH DES_SUPPORTED,
+  PUBLIC_KEY_ALGORITHMS,
+  CHACHA20 AES BLOWFISH DES_SUPPORTED,
+  CHACHA20 AES BLOWFISH DES_SUPPORTED,
   "hmac-sha2-256,hmac-sha2-512,hmac-sha1",
   "hmac-sha2-256,hmac-sha2-512,hmac-sha1",
   ZLIB,
@@ -146,8 +152,8 @@ static const char *ssh_kex_descriptions[] = {
 /* tokenize will return a token of strings delimited by ",". the first element has to be freed */
 static char **tokenize(const char *chain){
     char **tokens;
-    int n=1;
-    int i=0;
+    size_t n=1;
+    size_t i=0;
     char *tmp;
     char *ptr;
 
@@ -184,8 +190,8 @@ static char **tokenize(const char *chain){
 /* TODO FIXME rewrite me! */
 char **ssh_space_tokenize(const char *chain){
     char **tokens;
-    int n=1;
-    int i=0;
+    size_t n=1;
+    size_t i=0;
     char *tmp;
     char *ptr;
 
@@ -227,6 +233,15 @@ char **ssh_space_tokenize(const char *chain){
     }
     tokens[i]=NULL;
     return tokens;
+}
+
+const char *ssh_kex_get_default_methods(uint32_t algo)
+{
+    if (algo >= KEX_METHODS_SIZE) {
+        return NULL;
+    }
+
+    return default_methods[algo];
 }
 
 const char *ssh_kex_get_supported_method(uint32_t algo) {
@@ -400,10 +415,10 @@ out:
 }
 
 SSH_PACKET_CALLBACK(ssh_packet_kexinit){
-    int i;
+    int i, ok;
     int server_kex=session->server;
     ssh_string str = NULL;
-    char *strings[KEX_METHODS_SIZE];
+    char *strings[KEX_METHODS_SIZE] = {0};
     int rc = SSH_ERROR;
 
     uint8_t first_kex_packet_follows = 0;
@@ -412,7 +427,6 @@ SSH_PACKET_CALLBACK(ssh_packet_kexinit){
     (void)type;
     (void)user;
 
-    memset(strings, 0, sizeof(strings));
     if (session->session_state == SSH_SESSION_STATE_AUTHENTICATED){
         SSH_LOG(SSH_LOG_WARNING, "Other side initiating key re-exchange");
     } else if(session->session_state != SSH_SESSION_STATE_INITIAL_KEX){
@@ -505,6 +519,22 @@ SSH_PACKET_CALLBACK(ssh_packet_kexinit){
         }
 
         /*
+         * If client sent a ext-info-c message in the kex list, it supports
+         * RFC 8308 extension negotiation.
+         */
+        ok = ssh_match_group(session->next_crypto->client_kex.methods[SSH_KEX],
+                             KEX_EXTENSION_CLIENT);
+        if (ok) {
+            /*
+             * Enable all the supported extensions and when the time comes
+             * (after NEWKEYS) send them to the client.
+             */
+            SSH_LOG(SSH_LOG_DEBUG, "The client supports extension "
+                    "negotiation: enabling all extensions");
+            session->extensions = SSH_EXT_ALL;
+        }
+
+        /*
          * Remember whether 'first_kex_packet_follows' was set and the client
          * guess was wrong: in this case the next SSH_MSG_KEXDH_INIT message
          * must be ignored.
@@ -562,7 +592,8 @@ void ssh_list_kex(struct ssh_kex_struct *kex) {
  * @returns a cstring containing a comma-separated list of hostkey methods.
  *          NULL if no method matches
  */
-static char *ssh_client_select_hostkeys(ssh_session session){
+static char *ssh_client_select_hostkeys(ssh_session session)
+{
     char methods_buffer[128]={0};
     static const char *preferred_hostkeys[] = {
         "ssh-ed25519",
@@ -573,55 +604,86 @@ static char *ssh_client_select_hostkeys(ssh_session session){
 #ifdef HAVE_DSA
         "ssh-dss",
 #endif
-        "ssh-rsa1",
         NULL
     };
-    char **methods;
-    int i,j;
-    int needcoma=0;
+    struct ssh_list *algo_list = NULL;
+    struct ssh_iterator *it = NULL;
+    size_t algo_count;
+    int needcomma = 0;
+    int i;
 
-    methods = ssh_knownhosts_algorithms(session);
-	if (methods == NULL || methods[0] == NULL){
-		SAFE_FREE(methods);
-		return NULL;
-	}
+    algo_list = ssh_known_hosts_get_algorithms(session);
+    if (algo_list == NULL) {
+        return NULL;
+    }
 
-	for (i=0;preferred_hostkeys[i] != NULL; ++i){
-		for (j=0; methods[j] != NULL; ++j){
-			if(strcmp(preferred_hostkeys[i], methods[j]) == 0){
-				if (ssh_verify_existing_algo(SSH_HOSTKEYS, methods[j])){
-					if(needcoma)
-						strncat(methods_buffer,",",sizeof(methods_buffer)-strlen(methods_buffer)-1);
-					strncat(methods_buffer, methods[j], sizeof(methods_buffer)-strlen(methods_buffer)-1);
-					needcoma = 1;
-				}
-			}
-		}
-	}
-	for(i=0;methods[i]!= NULL; ++i){
-		SAFE_FREE(methods[i]);
-	}
-	SAFE_FREE(methods);
+    algo_count = ssh_list_count(algo_list);
+    if (algo_count == 0) {
+        ssh_list_free(algo_list);
+        return NULL;
+    }
 
-	if(strlen(methods_buffer) > 0){
-		SSH_LOG(SSH_LOG_DEBUG, "Changing host key method to \"%s\"", methods_buffer);
-		return strdup(methods_buffer);
-	} else {
-		SSH_LOG(SSH_LOG_DEBUG, "No supported kex method for existing key in known_hosts file");
-		return NULL;
-	}
+    for (i = 0; preferred_hostkeys[i] != NULL; ++i) {
+        for (it = ssh_list_get_iterator(algo_list);
+             it != NULL;
+             it = ssh_list_get_iterator(algo_list)) {
+            const char *algo = ssh_iterator_value(const char *, it);
+            int cmp;
+            int ok;
 
+            cmp = strcmp(preferred_hostkeys[i], algo);
+            if (cmp == 0) {
+                ok = ssh_verify_existing_algo(SSH_HOSTKEYS, algo);
+                if (ok) {
+                    if (needcomma) {
+                        strncat(methods_buffer,
+                                ",",
+                                sizeof(methods_buffer) - strlen(methods_buffer) - 1);
+                    }
+                    strncat(methods_buffer,
+                            algo,
+                            sizeof(methods_buffer) - strlen(methods_buffer) - 1);
+                    needcomma = 1;
+                }
+            }
+
+            ssh_list_remove(algo_list, it);
+        }
+    }
+    ssh_list_free(algo_list);
+
+    if (strlen(methods_buffer) == 0) {
+        SSH_LOG(SSH_LOG_DEBUG,
+                "No supported kex method for existing key in known_hosts file");
+        return NULL;
+    }
+
+    SSH_LOG(SSH_LOG_DEBUG,
+            "Changing host key method to \"%s\"",
+            methods_buffer);
+
+    return strdup(methods_buffer);
 }
+
 /**
  * @brief sets the key exchange parameters to be sent to the server,
  *        in function of the options and available methods.
  */
-int ssh_set_client_kex(ssh_session session){
+int ssh_set_client_kex(ssh_session session)
+{
     struct ssh_kex_struct *client= &session->next_crypto->client_kex;
     const char *wanted;
+    char *kex = NULL;
+    char *kex_tmp = NULL;
+    int ok;
     int i;
+    size_t kex_len, len;
 
-    ssh_get_random(client->cookie, 16, 0);
+    ok = ssh_get_random(client->cookie, 16, 0);
+    if (!ok) {
+        ssh_set_error(session, SSH_FATAL, "PRNG error");
+        return SSH_ERROR;
+    }
 
     memset(client->methods, 0, KEX_METHODS_SIZE * sizeof(char **));
     /* first check if we have specific host key methods */
@@ -636,7 +698,28 @@ int ssh_set_client_kex(ssh_session session){
         if (wanted == NULL)
             wanted = default_methods[i];
         client->methods[i] = strdup(wanted);
+        if (client->methods[i] == NULL) {
+            ssh_set_error_oom(session);
+            return SSH_ERROR;
+        }
     }
+
+    /* Here we append  ext-info-c  to the list of kex algorithms */
+    kex = client->methods[SSH_KEX];
+    len = strlen(kex);
+    if (len + strlen(KEX_EXTENSION_CLIENT) + 2 < len) {
+        /* Overflow */
+        return SSH_ERROR;
+    }
+    kex_len = len + strlen(KEX_EXTENSION_CLIENT) + 2; /* comma, NULL */
+    kex_tmp = realloc(kex, kex_len);
+    if (kex_tmp == NULL) {
+        free(kex);
+        ssh_set_error_oom(session);
+        return SSH_ERROR;
+    }
+    snprintf(kex_tmp + len, kex_len - len, ",%s", KEX_EXTENSION_CLIENT);
+    client->methods[SSH_KEX] = kex_tmp;
 
     return SSH_OK;
 }
@@ -647,7 +730,15 @@ int ssh_set_client_kex(ssh_session session){
 int ssh_kex_select_methods (ssh_session session){
     struct ssh_kex_struct *server = &session->next_crypto->server_kex;
     struct ssh_kex_struct *client = &session->next_crypto->client_kex;
+    char *ext_start = NULL;
     int i;
+
+    /* Here we should drop the  ext-info-c  from the list so we avoid matching.
+     * it. We added it to the end, so we can just truncate the string here */
+    ext_start = strstr(client->methods[SSH_KEX], ","KEX_EXTENSION_CLIENT);
+    if (ext_start != NULL) {
+        ext_start[0] = '\0';
+    }
 
     for (i = 0; i < KEX_METHODS_SIZE; i++) {
         session->next_crypto->kex_methods[i]=ssh_find_matching(server->methods[i],client->methods[i]);
@@ -664,6 +755,10 @@ int ssh_kex_select_methods (ssh_session session){
       session->next_crypto->kex_type=SSH_KEX_DH_GROUP1_SHA1;
     } else if(strcmp(session->next_crypto->kex_methods[SSH_KEX], "diffie-hellman-group14-sha1") == 0){
       session->next_crypto->kex_type=SSH_KEX_DH_GROUP14_SHA1;
+    } else if(strcmp(session->next_crypto->kex_methods[SSH_KEX], "diffie-hellman-group16-sha512") == 0){
+      session->next_crypto->kex_type=SSH_KEX_DH_GROUP16_SHA512;
+    } else if(strcmp(session->next_crypto->kex_methods[SSH_KEX], "diffie-hellman-group18-sha512") == 0){
+      session->next_crypto->kex_type=SSH_KEX_DH_GROUP18_SHA512;
     } else if(strcmp(session->next_crypto->kex_methods[SSH_KEX], "ecdh-sha2-nistp256") == 0){
       session->next_crypto->kex_type=SSH_KEX_ECDH_SHA2_NISTP256;
     } else if(strcmp(session->next_crypto->kex_methods[SSH_KEX], "ecdh-sha2-nistp384") == 0){
@@ -672,8 +767,21 @@ int ssh_kex_select_methods (ssh_session session){
       session->next_crypto->kex_type=SSH_KEX_ECDH_SHA2_NISTP521;
     } else if(strcmp(session->next_crypto->kex_methods[SSH_KEX], "curve25519-sha256@libssh.org") == 0){
       session->next_crypto->kex_type=SSH_KEX_CURVE25519_SHA256_LIBSSH_ORG;
+    } else if(strcmp(session->next_crypto->kex_methods[SSH_KEX], "curve25519-sha256") == 0){
+      session->next_crypto->kex_type=SSH_KEX_CURVE25519_SHA256;
     }
-
+    SSH_LOG(SSH_LOG_INFO, "Negotiated %s,%s,%s,%s,%s,%s,%s,%s,%s,%s",
+            session->next_crypto->kex_methods[SSH_KEX],
+            session->next_crypto->kex_methods[SSH_HOSTKEYS],
+            session->next_crypto->kex_methods[SSH_CRYPT_C_S],
+            session->next_crypto->kex_methods[SSH_CRYPT_S_C],
+            session->next_crypto->kex_methods[SSH_MAC_C_S],
+            session->next_crypto->kex_methods[SSH_MAC_S_C],
+            session->next_crypto->kex_methods[SSH_COMP_C_S],
+            session->next_crypto->kex_methods[SSH_COMP_S_C],
+            session->next_crypto->kex_methods[SSH_LANG_C_S],
+            session->next_crypto->kex_methods[SSH_LANG_S_C]
+    );
     return SSH_OK;
 }
 

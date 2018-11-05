@@ -72,7 +72,8 @@ static void pkd_sighandler(int signum) {
     (void) signum;
 }
 
-static int pkd_init_libssh() {
+static int pkd_init_libssh(void)
+{
     int rc = ssh_threads_set_callbacks(ssh_threads_get_pthread());
     return (rc == SSH_OK) ? 0 : 1;
 }
@@ -115,7 +116,8 @@ out:
     return rc;
 }
 
-static int pkd_accept_fd() {
+static int pkd_accept_fd(void)
+{
     int fd = -1;
     struct sockaddr_in addr;
     socklen_t len = sizeof(addr);
@@ -253,6 +255,8 @@ static int pkd_exec_hello(int fd, struct pkd_daemon_args *args) {
 
     if (type == PKD_RSA) {
         opts = SSH_BIND_OPTIONS_RSAKEY;
+    } else if (type == PKD_ED25519) {
+        opts = SSH_BIND_OPTIONS_HOSTKEY;
 #ifdef HAVE_DSA
     } else if (type == PKD_DSA) {
         opts = SSH_BIND_OPTIONS_DSAKEY;
@@ -369,7 +373,9 @@ static int pkd_exec_hello(int fd, struct pkd_daemon_args *args) {
            (pkd_state.close_received == 0)) {
         rc = ssh_event_dopoll(e, 1000 /* milliseconds */);
         if (rc == SSH_ERROR) {
-            pkderr("ssh_event_dopoll for eof + close: %s\n", ssh_get_error(s));
+            /* log, but don't consider this fatal */
+            pkdout("ssh_event_dopoll for eof + close: %s\n", ssh_get_error(s));
+            rc = 0;
             break;
         } else {
             rc = 0;
@@ -380,7 +386,9 @@ static int pkd_exec_hello(int fd, struct pkd_daemon_args *args) {
            (ssh_is_connected(s))) {
         rc = ssh_event_dopoll(e, 1000 /* milliseconds */);
         if (rc == SSH_ERROR) {
-            pkderr("ssh_event_dopoll for session connection: %s\n", ssh_get_error(s));
+            /* log, but don't consider this fatal */
+            pkdout("ssh_event_dopoll for session connection: %s\n", ssh_get_error(s));
+            rc = 0;
             break;
         } else {
             rc = 0;
@@ -429,6 +437,9 @@ static void *pkd_main(void *args) {
         pkderr("sigaction: %d\n", rc);
         goto out;
     }
+
+    /* Ignore SIGPIPE */
+    signal(SIGPIPE, SIG_IGN);
 
     rc = pkd_init_libssh();
     if (rc != 0) {

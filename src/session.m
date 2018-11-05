@@ -31,9 +31,6 @@
 #include "libssh/crypto.h"
 #include "libssh/server.h"
 #include "libssh/socket.h"
-#ifdef WITH_SSH1
-#include "libssh/ssh1.h"
-#endif /* WITH_SSH1 */
 #include "libssh/ssh2.h"
 #include "libssh/agent.h"
 #include "libssh/packet.h"
@@ -63,11 +60,10 @@ ssh_session ssh_new(void) {
   char *id = NULL;
   int rc;
 
-  session = malloc(sizeof (struct ssh_session_struct));
+  session = calloc(1, sizeof (struct ssh_session_struct));
   if (session == NULL) {
     return NULL;
   }
-  ZERO_STRUCTP(session);
 
   session->next_crypto = crypto_new();
   if (session->next_crypto == NULL) {
@@ -90,7 +86,7 @@ ssh_session ssh_new(void) {
   }
 
   session->alive = 0;
-  session->auth_methods = 0;
+  session->auth.supported_methods = 0;
   ssh_set_blocking(session, 1);
   session->maxchannel = FIRST_CHANNEL;
 
@@ -105,14 +101,8 @@ ssh_session ssh_new(void) {
     session->opts.StrictHostKeyChecking = 1;
     session->opts.port = 0;
     session->opts.fd = -1;
-    session->opts.ssh2 = 1;
     session->opts.compressionlevel=7;
     session->opts.nodelay = 0;
-#ifdef WITH_SSH1
-    session->opts.ssh1 = 1;
-#else
-    session->opts.ssh1 = 0;
-#endif
     session->opts.flags = SSH_OPT_FLAG_PASSWORD_AUTH | SSH_OPT_FLAG_PUBKEY_AUTH |
             SSH_OPT_FLAG_KBDINT_AUTH | SSH_OPT_FLAG_GSSAPI_AUTH;
     session->opts.identity = ssh_list_new();
@@ -159,15 +149,6 @@ ssh_session ssh_new(void) {
       goto err;
     }
 #endif
-
-    id = strdup("%d/identity");
-    if (id == NULL) {
-      goto err;
-    }
-    rc = ssh_list_append(session->opts.identity, id);
-    if (rc == SSH_ERROR) {
-      goto err;
-    }
 
     return session;
 
@@ -286,7 +267,7 @@ void ssh_free(ssh_session session) {
 #endif
   session->agent_state = NULL;
 
-  SAFE_FREE(session->auth_auto_state);
+  SAFE_FREE(session->auth.auto_state);
   SAFE_FREE(session->serverbanner);
   SAFE_FREE(session->clientbanner);
   SAFE_FREE(session->banner);
@@ -297,9 +278,11 @@ void ssh_free(ssh_session session) {
   SAFE_FREE(session->opts.host);
   SAFE_FREE(session->opts.sshdir);
   SAFE_FREE(session->opts.knownhosts);
+  SAFE_FREE(session->opts.global_knownhosts);
   SAFE_FREE(session->opts.ProxyCommand);
   SAFE_FREE(session->opts.gss_server_identity);
   SAFE_FREE(session->opts.gss_client_identity);
+  SAFE_FREE(session->opts.pubkey_accepted_types);
 
   for (i = 0; i < 10; i++) {
       if (session->opts.wanted_methods[i]) {
@@ -359,12 +342,18 @@ const char* ssh_get_kex_algo(ssh_session session) {
             return "diffie-hellman-group1-sha1";
         case SSH_KEX_DH_GROUP14_SHA1:
             return "diffie-hellman-group14-sha1";
+        case SSH_KEX_DH_GROUP16_SHA512:
+            return "diffie-hellman-group16-sha512";
+        case SSH_KEX_DH_GROUP18_SHA512:
+            return "diffie-hellman-group18-sha512";
         case SSH_KEX_ECDH_SHA2_NISTP256:
             return "ecdh-sha2-nistp256";
         case SSH_KEX_ECDH_SHA2_NISTP384:
             return "ecdh-sha2-nistp384";
         case SSH_KEX_ECDH_SHA2_NISTP521:
             return "ecdh-sha2-nistp521";
+        case SSH_KEX_CURVE25519_SHA256:
+           return "curve25519-sha256";
         case SSH_KEX_CURVE25519_SHA256_LIBSSH_ORG:
             return "curve25519-sha256@libssh.org";
         default:
@@ -818,14 +807,14 @@ const char *ssh_get_disconnect_message(ssh_session session) {
  *
  * @param session       The ssh session to use.
  *
- * @return 1 or 2, for ssh1 or ssh2, < 0 on error.
+ * @return The SSH version as integer, < 0 on error.
  */
 int ssh_get_version(ssh_session session) {
-  if (session == NULL) {
-    return -1;
-  }
+    if (session == NULL) {
+        return -1;
+    }
 
-  return session->version;
+    return 2;
 }
 
 /**
@@ -856,11 +845,7 @@ void ssh_socket_exception_callback(int code, int errno_code, void *user){
  * @return              SSH_OK on success, SSH_ERROR otherwise.
  */
 int ssh_send_ignore (ssh_session session, const char *data) {
-#ifdef WITH_SSH1
-    const int type = session->version == 1 ? SSH_MSG_IGNORE : SSH2_MSG_IGNORE;
-#else /* WITH_SSH1 */
     const int type = SSH2_MSG_IGNORE;
-#endif /* WITH_SSH1 */
     int rc;
 
     if (ssh_socket_is_open(session->socket)) {
@@ -898,22 +883,12 @@ int ssh_send_debug (ssh_session session, const char *message, int always_display
     int rc;
 
     if (ssh_socket_is_open(session->socket)) {
-#ifdef WITH_SSH1
-        if (session->version == 1) {
-            rc = ssh_buffer_pack(session->out_buffer,
-                                 "bs",
-                                 SSH_MSG_DEBUG,
-                                 message);
-        } else
-#endif /* WITH_SSH1 */
-        {
-            rc = ssh_buffer_pack(session->out_buffer,
-                                 "bbsd",
-                                 SSH2_MSG_DEBUG,
-                                 always_display != 0 ? 1 : 0,
-                                 message,
-                                 0); /* empty language tag */
-        }
+        rc = ssh_buffer_pack(session->out_buffer,
+                             "bbsd",
+                             SSH2_MSG_DEBUG,
+                             always_display != 0 ? 1 : 0,
+                             message,
+                             0); /* empty language tag */
         if (rc != SSH_OK) {
             ssh_set_error_oom(session);
             goto error;
@@ -969,5 +944,3 @@ void ssh_set_counters(ssh_session session, ssh_counter scounter,
 }
 
 /** @} */
-
-/* vim: set ts=4 sw=4 et cindent: */

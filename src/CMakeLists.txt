@@ -1,5 +1,3 @@
-project(libssh-library C)
-
 set(LIBSSH_PUBLIC_INCLUDE_DIRS
   ${libssh_SOURCE_DIR}/include
   CACHE INTERNAL "libssh public include directories"
@@ -108,12 +106,12 @@ set(LIBSSH_SHARED_LIBRARY
   CACHE INTERNAL "libssh shared library"
 )
 
-if (WITH_STATIC_LIB)
+if (BUILD_STATIC_LIB)
   set(LIBSSH_STATIC_LIBRARY
     ssh_static
     CACHE INTERNAL "libssh static library"
   )
-endif (WITH_STATIC_LIB)
+endif (BUILD_STATIC_LIB)
 
 set(libssh_SRCS
   agent.c
@@ -158,15 +156,38 @@ set(libssh_SRCS
   wrapper.c
   external/bcrypt_pbkdf.c
   external/blowfish.c
+  external/chacha.c
   external/ed25519.c
   external/fe25519.c
   external/ge25519.c
+  external/poly1305.c
   external/sc25519.c
+  chachapoly.c
 )
+
+if (CMAKE_USE_PTHREADS_INIT)
+    set(libssh_SRCS
+        ${libssh_SRCS}
+        threads/noop.c
+        threads/pthread.c
+    )
+elseif (CMAKE_USE_WIN32_THREADS_INIT)
+        set(libssh_SRCS
+            ${libssh_SRCS}
+            threads/noop.c
+            threads/winlocks.c
+        )
+else()
+    set(libssh_SRCS
+        ${libssh_SRCS}
+        threads/noop.c
+    )
+endif()
 
 if (WITH_GCRYPT)
     set(libssh_SRCS
         ${libssh_SRCS}
+        threads/libgcrypt.c
         libgcrypt.c
         gcrypt_missing.c
         pki_gcrypt.c
@@ -175,6 +196,7 @@ if (WITH_GCRYPT)
 elseif (WITH_MBEDTLS)
     set(libssh_SRCS
         ${libssh_SRCS}
+        threads/mbedtls.c
         libmbedcrypto.c
         mbedcrypto_missing.c
         pki_mbedcrypto.c
@@ -183,6 +205,7 @@ elseif (WITH_MBEDTLS)
 else (WITH_GCRYPT)
     set(libssh_SRCS
         ${libssh_SRCS}
+        threads/libcrypto.c
         pki_crypto.c
         ecdh_crypto.c
         libcrypto.c
@@ -205,17 +228,6 @@ if (WITH_SFTP)
     )
   endif (WITH_SERVER)
 endif (WITH_SFTP)
-
-if (WITH_SSH1)
-  set(libssh_SRCS
-    ${libssh_SRCS}
-    auth1.c
-    channels1.c
-    crc32.c
-    kex1.c
-    packet1.c
-  )
-endif (WITH_SSH1)
 
 if (WITH_SERVER)
   set(libssh_SRCS
@@ -251,9 +263,52 @@ include_directories(
   ${LIBSSH_PRIVATE_INCLUDE_DIRS}
 )
 
+# Set the path to the default map file
+set(MAP_PATH "${CMAKE_CURRENT_SOURCE_DIR}/${PROJECT_NAME}.map")
+
+if (WITH_SYMBOL_VERSIONING AND HAVE_LD_VERSION_SCRIPT AND ABIMAP_FOUND)
+    # Get the list of header files
+    get_file_list(dev_header_list
+                  DIRECTORIES "${LIBSSH_PUBLIC_INCLUDE_DIRS}/libssh"
+                  FILES_PATTERNS "*.h")
+
+    # Extract the symbols marked as "LIBSSH_API" from the header files
+    extract_symbols("${PROJECT_NAME}_dev.symbols"
+                    HEADERS_LIST dev_header_list
+                    FILTER_PATTERN "LIBSSH_API")
+
+    if (WITH_ABI_BREAK)
+        set(ALLOW_ABI_BREAK "BREAK_ABI")
+    endif()
+
+    # Generate the symbol version map file
+    generate_map_file("${PROJECT_NAME}_dev.map"
+                      SYMBOLS "${PROJECT_NAME}_dev.symbols"
+                      RELEASE_NAME_VERSION ${PROJECT_NAME}_AFTER_${LIBRARY_VERSION}
+                      CURRENT_MAP ${MAP_PATH}
+                      ${ALLOW_ABI_BREAK})
+
+    set(libssh_SRCS
+      ${libssh_SRCS}
+      ${PROJECT_NAME}_dev.map
+    )
+endif (WITH_SYMBOL_VERSIONING AND HAVE_LD_VERSION_SCRIPT AND ABIMAP_FOUND)
+
 add_library(${LIBSSH_SHARED_LIBRARY} SHARED ${libssh_SRCS})
+target_compile_options(${LIBSSH_SHARED_LIBRARY} PRIVATE ${DEFAULT_C_COMPILE_FLAGS})
 
 target_link_libraries(${LIBSSH_SHARED_LIBRARY} ${LIBSSH_LINK_LIBRARIES})
+
+if (WITH_SYMBOL_VERSIONING AND HAVE_LD_VERSION_SCRIPT)
+    if (ABIMAP_FOUND)
+        # Change path to devel map file
+        set(MAP_PATH "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}_dev.map")
+    endif (ABIMAP_FOUND)
+
+    set_target_properties(${LIBSSH_SHARED_LIBRARY}
+                          PROPERTIES LINK_FLAGS
+                          "-Wl,--version-script,\"${MAP_PATH}\"")
+endif (WITH_SYMBOL_VERSIONING AND HAVE_LD_VERSION_SCRIPT)
 
 set_target_properties(
   ${LIBSSH_SHARED_LIBRARY}
@@ -286,8 +341,9 @@ install(
   COMPONENT libraries
 )
 
-if (WITH_STATIC_LIB)
+if (BUILD_STATIC_LIB)
   add_library(${LIBSSH_STATIC_LIBRARY} STATIC ${libssh_SRCS})
+  target_compile_options(${LIBSSH_STATIC_LIBRARY} PRIVATE ${DEFAULT_C_COMPILE_FLAGS})
 
   if (MSVC)
     set(OUTPUT_SUFFIX static)
@@ -316,17 +372,14 @@ if (WITH_STATIC_LIB)
     )
   endif (WIN32)
 
-  install(
-    TARGETS
-      ${LIBSSH_STATIC_LIBRARY}
-    DESTINATION
-      ${LIB_INSTALL_DIR}/${OUTPUT_SUFFIX}
-    COMPONENT
-      libraries
-  )
-endif (WITH_STATIC_LIB)
+    if (WITH_STATIC_LIB)
+      install(TARGETS
+                ${LIBSSH_STATIC_LIBRARY}
+              DESTINATION
+                ${LIB_INSTALL_DIR}/${OUTPUT_SUFFIX}
+              COMPONENT
+                libraries)
+    endif (WITH_STATIC_LIB)
+endif (BUILD_STATIC_LIB)
 
 message(STATUS "Threads_FOUND=${Threads_FOUND}")
-if (Threads_FOUND)
-    add_subdirectory(threads)
-endif (Threads_FOUND)

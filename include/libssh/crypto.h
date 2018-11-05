@@ -60,15 +60,19 @@ enum ssh_key_exchange_e {
   /* ecdh-sha2-nistp521 */
   SSH_KEX_ECDH_SHA2_NISTP521,
   /* curve25519-sha256@libssh.org */
-  SSH_KEX_CURVE25519_SHA256_LIBSSH_ORG
+  SSH_KEX_CURVE25519_SHA256_LIBSSH_ORG,
+  /* curve25519-sha256 */
+  SSH_KEX_CURVE25519_SHA256,
+  /* diffie-hellman-group16-sha512 */
+  SSH_KEX_DH_GROUP16_SHA512,
+  /* diffie-hellman-group18-sha512 */
+  SSH_KEX_DH_GROUP18_SHA512,
 };
 
 enum ssh_cipher_e {
     SSH_NO_CIPHER=0,
     SSH_BLOWFISH_CBC,
     SSH_3DES_CBC,
-    SSH_3DES_CBC_SSH1,
-    SSH_DES_CBC_SSH1,
     SSH_AES128_CBC,
     SSH_AES192_CBC,
     SSH_AES256_CBC,
@@ -128,8 +132,9 @@ struct ssh_cipher_struct {
     const char *name; /* ssh name of the algorithm */
     unsigned int blocksize; /* blocksize of the algo */
     enum ssh_cipher_e ciphertype;
-#ifdef HAVE_LIBGCRYPT
+    uint32_t lenfield_blocksize; /* blocksize of the packet length field */
     size_t keylen; /* length of the key structure */
+#ifdef HAVE_LIBGCRYPT
     gcry_cipher_hd_t *key;
 #elif defined HAVE_LIBCRYPTO
     struct ssh_3des_key_schedule *des3_key;
@@ -141,7 +146,9 @@ struct ssh_cipher_struct {
     mbedtls_cipher_context_t decrypt_ctx;
     mbedtls_cipher_type_t type;
 #endif
+    struct chacha20_poly1305_keysched *chacha20_schedule;
     unsigned int keysize; /* bytes of key used. != keylen */
+    size_t tag_size; /* overhead required for tag */
     /* sets the new key for immediate use */
     int (*set_encrypt_key)(struct ssh_cipher_struct *cipher, void *key, void *IV);
     int (*set_decrypt_key)(struct ssh_cipher_struct *cipher, void *key, void *IV);
@@ -149,8 +156,15 @@ struct ssh_cipher_struct {
         unsigned long len);
     void (*decrypt)(struct ssh_cipher_struct *cipher, void *in, void *out,
         unsigned long len);
+    void (*aead_encrypt)(struct ssh_cipher_struct *cipher, void *in, void *out,
+        size_t len, uint8_t *mac, uint64_t seq);
+    int (*aead_decrypt_length)(struct ssh_cipher_struct *cipher, void *in,
+        uint8_t *out, size_t len, uint64_t seq);
+    int (*aead_decrypt)(struct ssh_cipher_struct *cipher, void *complete_packet, uint8_t *out,
+        size_t encrypted_size, uint64_t seq);
     void (*cleanup)(struct ssh_cipher_struct *cipher);
 };
 
-/* vim: set ts=2 sw=2 et cindent: */
+const struct ssh_cipher_struct *ssh_get_chacha20poly1305_cipher(void);
+
 #endif /* _CRYPTO_H_ */

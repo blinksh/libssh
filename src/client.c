@@ -171,15 +171,12 @@ static int callback_receive_banner(const void *data, size_t len, void *user)
  */
 int ssh_send_banner(ssh_session session, int server)
 {
-    const char *banner = NULL;
-    const char *terminator = NULL;
+    const char *banner = CLIENT_BANNER_SSH2;
+    const char *terminator = "\r\n";
     /* The maximum banner length is 255 for SSH2 */
     char buffer[256] = {0};
     size_t len;
     int rc = SSH_ERROR;
-
-    banner = session->version == 1 ? CLIENTBANNER1 : CLIENTBANNER2;
-    terminator = session->version == 1 ? "\n" : "\r\n";
 
     if (server == 1) {
         if (session->opts.custombanner == NULL){
@@ -211,11 +208,8 @@ int ssh_send_banner(ssh_session session, int server)
             goto end;
         }
 
-        /* SSH version 1 has a banner length of 128 only */
-        len = session->version == 1 ? 128 : 0;
-
         snprintf(buffer,
-                 sizeof(buffer) - len,
+                 sizeof(buffer),
                  "%s%s",
                  session->clientbanner,
                  terminator);
@@ -256,6 +250,8 @@ static int dh_handshake(ssh_session session) {
       switch(session->next_crypto->kex_type){
         case SSH_KEX_DH_GROUP1_SHA1:
         case SSH_KEX_DH_GROUP14_SHA1:
+        case SSH_KEX_DH_GROUP16_SHA512:
+        case SSH_KEX_DH_GROUP18_SHA512:
           rc = ssh_client_dh_init(session);
           break;
 #ifdef HAVE_ECDH
@@ -266,6 +262,7 @@ static int dh_handshake(ssh_session session) {
           break;
 #endif
 #ifdef HAVE_CURVE25519
+        case SSH_KEX_CURVE25519_SHA256:
         case SSH_KEX_CURVE25519_SHA256_LIBSSH_ORG:
           rc = ssh_client_curve25519_init(session);
           break;
@@ -300,7 +297,7 @@ static int dh_handshake(ssh_session session) {
 static int ssh_service_request_termination(void *s){
   ssh_session session = (ssh_session)s;
   if(session->session_state == SSH_SESSION_STATE_ERROR ||
-      session->auth_service_state != SSH_AUTH_SERVICE_SENT)
+      session->auth.service_state != SSH_AUTH_SERVICE_SENT)
     return 1;
   else
     return 0;
@@ -324,7 +321,7 @@ static int ssh_service_request_termination(void *s){
 int ssh_service_request(ssh_session session, const char *service) {
   int rc=SSH_ERROR;
 
-  if(session->auth_service_state != SSH_AUTH_SERVICE_NONE)
+  if(session->auth.service_state != SSH_AUTH_SERVICE_NONE)
     goto pending;
 
   rc = ssh_buffer_pack(session->out_buffer,
@@ -335,7 +332,7 @@ int ssh_service_request(ssh_session session, const char *service) {
       ssh_set_error_oom(session);
       return SSH_ERROR;
   }
-  session->auth_service_state=SSH_AUTH_SERVICE_SENT;
+  session->auth.service_state = SSH_AUTH_SERVICE_SENT;
   if (ssh_packet_send(session) == SSH_ERROR) {
     ssh_set_error(session, SSH_FATAL,
         "Sending SSH2_MSG_SERVICE_REQUEST failed.");
@@ -350,7 +347,7 @@ pending:
   if (rc == SSH_ERROR) {
       return SSH_ERROR;
   }
-  switch(session->auth_service_state){
+  switch(session->auth.service_state) {
   case SSH_AUTH_SERVICE_DENIED:
     ssh_set_error(session,SSH_FATAL,"ssh_auth_service request denied");
     break;
@@ -361,8 +358,6 @@ pending:
     rc=SSH_AGAIN;
     break;
   case SSH_AUTH_SERVICE_NONE:
-  case SSH_AUTH_SERVICE_USER_SENT:
-    /* Invalid state, SSH1 specific */
     rc=SSH_ERROR;
     break;
   }
@@ -382,122 +377,86 @@ pending:
  * @brief A function to be called each time a step has been done in the
  * connection.
  */
-static void ssh_client_connection_callback(ssh_session session){
-	int ssh1,ssh2;
+static void ssh_client_connection_callback(ssh_session session)
+{
+    int rc;
 
-	switch(session->session_state){
-		case SSH_SESSION_STATE_NONE:
-		case SSH_SESSION_STATE_CONNECTING:
-			break;
-		case SSH_SESSION_STATE_SOCKET_CONNECTED:
-            /* If SSHv1 is disabled, we can send the banner immedietly */
-            if (session->opts.ssh1 == 0) {
-                ssh_set_fd_towrite(session);
-                ssh_send_banner(session, 0);
+    switch(session->session_state) {
+        case SSH_SESSION_STATE_NONE:
+        case SSH_SESSION_STATE_CONNECTING:
+            break;
+        case SSH_SESSION_STATE_SOCKET_CONNECTED:
+            ssh_set_fd_towrite(session);
+            ssh_send_banner(session, 0);
+
+            break;
+        case SSH_SESSION_STATE_BANNER_RECEIVED:
+            if (session->serverbanner == NULL) {
+                goto error;
             }
-			break;
-		case SSH_SESSION_STATE_BANNER_RECEIVED:
-		  if (session->serverbanner == NULL) {
-		    goto error;
-		  }
-		  set_status(session, 0.4f);
-		  SSH_LOG(SSH_LOG_RARE,
-		      "SSH server banner: %s", session->serverbanner);
+            set_status(session, 0.4f);
+            SSH_LOG(SSH_LOG_RARE,
+                    "SSH server banner: %s", session->serverbanner);
 
-		  /* Here we analyze the different protocols the server allows. */
-		  if (ssh_analyze_banner(session, 0, &ssh1, &ssh2) < 0) {
-		    goto error;
-		  }
-		  /* Here we decide which version of the protocol to use. */
-		  if (ssh2 && session->opts.ssh2) {
-		    session->version = 2;
-#ifdef WITH_SSH1
-		    } else if(ssh1 && session->opts.ssh1) {
-		    session->version = 1;
-#endif
-		    } else if(ssh1 && !session->opts.ssh1){
-#ifdef WITH_SSH1
-		    ssh_set_error(session, SSH_FATAL,
-		        "SSH-1 protocol not available (configure session to allow SSH-1)");
-		    goto error;
-#else
-		    ssh_set_error(session, SSH_FATAL,
-		        "SSH-1 protocol not available (libssh compiled without SSH-1 support)");
-		    goto error;
-#endif
-		  } else {
-		    ssh_set_error(session, SSH_FATAL,
-		        "No version of SSH protocol usable (banner: %s)",
-		        session->serverbanner);
-		    goto error;
-		  }
-		  /* from now, the packet layer is handling incoming packets */
-		  if (session->version == 2) {
-		      ssh_packet_register_socket_callback(session, session->socket);
-		  }
-#ifdef WITH_SSH1
-		  else
-		    session->socket_callbacks.data=ssh_packet_socket_callback1;
-#endif
-		  ssh_packet_set_default_callbacks(session);
-		  session->session_state=SSH_SESSION_STATE_INITIAL_KEX;
-          if (session->opts.ssh1 == 1) {
-              ssh_send_banner(session, 0);
-          }
-		  set_status(session, 0.5f);
-		  break;
-		case SSH_SESSION_STATE_INITIAL_KEX:
-		/* TODO: This state should disappear in favor of get_key handle */
-#ifdef WITH_SSH1
-			if(session->version==1){
-				if (ssh_get_kex1(session) < 0)
-					goto error;
-				set_status(session,0.6f);
-				session->connected = 1;
-				break;
-			}
-#endif
-			break;
-		case SSH_SESSION_STATE_KEXINIT_RECEIVED:
-			set_status(session,0.6f);
-			ssh_list_kex(&session->next_crypto->server_kex);
-			if (ssh_set_client_kex(session) < 0) {
-				goto error;
-			}
-			if (ssh_kex_select_methods(session) == SSH_ERROR)
-			    goto error;
-			if (ssh_send_kex(session, 0) < 0) {
-				goto error;
-			}
-			set_status(session,0.8f);
-			session->session_state=SSH_SESSION_STATE_DH;
-			if (dh_handshake(session) == SSH_ERROR) {
-				goto error;
-			}
+            /* Here we analyze the different protocols the server allows. */
+            rc = ssh_analyze_banner(session, 0);
+            if (rc < 0) {
+                ssh_set_error(session, SSH_FATAL,
+                        "No version of SSH protocol usable (banner: %s)",
+                        session->serverbanner);
+                goto error;
+            }
+
+            ssh_packet_register_socket_callback(session, session->socket);
+
+            ssh_packet_set_default_callbacks(session);
+            session->session_state = SSH_SESSION_STATE_INITIAL_KEX;
+            set_status(session, 0.5f);
+
+            break;
+        case SSH_SESSION_STATE_INITIAL_KEX:
+            /* TODO: This state should disappear in favor of get_key handle */
+            break;
+        case SSH_SESSION_STATE_KEXINIT_RECEIVED:
+            set_status(session,0.6f);
+            ssh_list_kex(&session->next_crypto->server_kex);
+            if (ssh_set_client_kex(session) < 0) {
+                goto error;
+            }
+            if (ssh_kex_select_methods(session) == SSH_ERROR)
+                goto error;
+            if (ssh_send_kex(session, 0) < 0) {
+                goto error;
+            }
+            set_status(session,0.8f);
+            session->session_state=SSH_SESSION_STATE_DH;
+            if (dh_handshake(session) == SSH_ERROR) {
+                goto error;
+            }
             /* FALL THROUGH */
-		case SSH_SESSION_STATE_DH:
-			if(session->dh_handshake_state==DH_STATE_FINISHED){
-				set_status(session,1.0f);
-				session->connected = 1;
-				if (session->flags & SSH_SESSION_FLAG_AUTHENTICATED)
-				    session->session_state = SSH_SESSION_STATE_AUTHENTICATED;
-				else
-				    session->session_state=SSH_SESSION_STATE_AUTHENTICATING;
-			}
-			break;
-		case SSH_SESSION_STATE_AUTHENTICATING:
-			break;
-		case SSH_SESSION_STATE_ERROR:
-			goto error;
-		default:
-			ssh_set_error(session,SSH_FATAL,"Invalid state %d",session->session_state);
-	}
+        case SSH_SESSION_STATE_DH:
+            if(session->dh_handshake_state==DH_STATE_FINISHED){
+                set_status(session,1.0f);
+                session->connected = 1;
+                if (session->flags & SSH_SESSION_FLAG_AUTHENTICATED)
+                    session->session_state = SSH_SESSION_STATE_AUTHENTICATED;
+                else
+                    session->session_state=SSH_SESSION_STATE_AUTHENTICATING;
+            }
+            break;
+        case SSH_SESSION_STATE_AUTHENTICATING:
+            break;
+        case SSH_SESSION_STATE_ERROR:
+            goto error;
+        default:
+            ssh_set_error(session,SSH_FATAL,"Invalid state %d",session->session_state);
+    }
 
-	return;
+    return;
 error:
-	ssh_socket_close(session->socket);
-	session->alive = 0;
-	session->session_state=SSH_SESSION_STATE_ERROR;
+    ssh_socket_close(session->socket);
+    session->alive = 0;
+    session->session_state=SSH_SESSION_STATE_ERROR;
 
 }
 
@@ -548,9 +507,6 @@ int ssh_connect(ssh_session session) {
   session->alive = 0;
   session->client = 1;
 
-  if (ssh_init() < 0) {
-    return SSH_ERROR;
-  }
   if (session->opts.fd == SSH_INVALID_SOCKET &&
       session->opts.host == NULL &&
       session->opts.ProxyCommand == NULL) {
@@ -710,6 +666,8 @@ void ssh_disconnect(ssh_session session) {
     ssh_socket_close(session->socket);
   }
 error:
+  session->recv_seq = 0;
+  session->send_seq = 0;
   session->alive = 0;
   if (session->socket != NULL){
     ssh_socket_reset(session->socket);
@@ -725,6 +683,13 @@ error:
     crypto_free(session->current_crypto);
     session->current_crypto=NULL;
   }
+  if (session->next_crypto) {
+    crypto_free(session->next_crypto);
+    session->next_crypto = crypto_new();
+    if (session->next_crypto == NULL) {
+      ssh_set_error_oom(session);
+    }
+  }
   if (session->in_buffer) {
     ssh_buffer_reinit(session->in_buffer);
   }
@@ -737,7 +702,7 @@ error:
   if (session->out_hashbuf) {
     ssh_buffer_reinit(session->out_hashbuf);
   }
-  session->auth_methods = 0;
+  session->auth.supported_methods = 0;
   SAFE_FREE(session->serverbanner);
   SAFE_FREE(session->clientbanner);
 
@@ -795,5 +760,3 @@ err:
 }
 #endif
 /** @} */
-
-/* vim: set ts=4 sw=4 et cindent: */

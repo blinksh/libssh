@@ -7,6 +7,7 @@
 
 #include <sys/types.h>
 #include <pwd.h>
+#include <errno.h>
 
 #define MAX_XFER_BUF_SIZE 16384
 
@@ -27,10 +28,13 @@ static int session_setup(void **state)
 {
     struct torture_state *s = *state;
     struct passwd *pwd;
+    int rc;
 
     pwd = getpwnam("bob");
     assert_non_null(pwd);
-    setuid(pwd->pw_uid);
+
+    rc = setuid(pwd->pw_uid);
+    assert_return_code(rc, errno);
 
     s->ssh.session = torture_ssh_session(TORTURE_SSH_SERVER,
                                          NULL,
@@ -98,7 +102,7 @@ static void torture_sftp_fsync(void **state) {
     fp = fopen(libssh_tmp_file, "r");
     assert_non_null(fp);
 
-    rc = lstat(libssh_tmp_file, &sb);
+    rc = fstat(fileno(fp), &sb);
     assert_return_code(rc, errno);
 
     bytesread = fread(buf_verify, sizeof(buf_verify), 1, fp);

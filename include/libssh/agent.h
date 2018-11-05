@@ -66,6 +66,9 @@
 #define SSH_COM_AGENT2_FAILURE                   102
 
 #define SSH_AGENT_OLD_SIGNATURE                  0x01
+/* Signature flags from draft-miller-ssh-agent-02 */
+#define SSH_AGENT_RSA_SHA2_256                   0x02
+#define SSH_AGENT_RSA_SHA2_512                   0x04
 
 struct ssh_agent_struct {
   struct ssh_socket_struct *sock;
@@ -115,4 +118,3 @@ ssh_string ssh_agent_sign_data(ssh_session session,
 #endif
 
 #endif /* __AGENT_H */
-/* vim: set ts=2 sw=2 et cindent: */

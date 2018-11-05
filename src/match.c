@@ -119,7 +119,7 @@ static int match_pattern(const char *s, const char *pattern) {
  * Returns -1 if negation matches, 1 if there is a positive match, 0 if there is
  * no match at all.
  */
-static int match_pattern_list(const char *string, const char *pattern,
+int match_pattern_list(const char *string, const char *pattern,
     unsigned int len, int dolower) {
   char sub[1024];
   int negated;
@@ -187,5 +187,3 @@ static int match_pattern_list(const char *string, const char *pattern,
 int match_hostname(const char *host, const char *pattern, unsigned int len) {
   return match_pattern_list(host, pattern, len, 1);
 }
-
-/* vim: set ts=2 sw=2 et cindent: */

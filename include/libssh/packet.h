@@ -45,23 +45,13 @@ enum ssh_packet_state_e {
 
 int ssh_packet_send(ssh_session session);
 
-#ifdef WITH_SSH1
-int ssh_packet_send1(ssh_session session) ;
-void ssh_packet_set_default_callbacks1(ssh_session session);
-
-SSH_PACKET_CALLBACK(ssh_packet_disconnect1);
-SSH_PACKET_CALLBACK(ssh_packet_smsg_success1);
-SSH_PACKET_CALLBACK(ssh_packet_smsg_failure1);
-int ssh_packet_socket_callback1(const void *data, size_t receivedlen, void *user);
-
-#endif
-
 SSH_PACKET_CALLBACK(ssh_packet_unimplemented);
 SSH_PACKET_CALLBACK(ssh_packet_disconnect_callback);
 SSH_PACKET_CALLBACK(ssh_packet_ignore_callback);
 SSH_PACKET_CALLBACK(ssh_packet_dh_reply);
 SSH_PACKET_CALLBACK(ssh_packet_newkeys);
 SSH_PACKET_CALLBACK(ssh_packet_service_accept);
+SSH_PACKET_CALLBACK(ssh_packet_ext_info);
 
 #ifdef WITH_SERVER
 SSH_PACKET_CALLBACK(ssh_packet_kexdh_init);
@@ -78,8 +68,9 @@ void ssh_packet_set_default_callbacks(ssh_session session);
 void ssh_packet_process(ssh_session session, uint8_t type);
 
 /* PACKET CRYPT */
-uint32_t ssh_packet_decrypt_len(ssh_session session, char *crypted);
-int ssh_packet_decrypt(ssh_session session, void *packet, unsigned int len);
+uint32_t ssh_packet_decrypt_len(ssh_session session, uint8_t *destination, uint8_t *source);
+int ssh_packet_decrypt(ssh_session session, uint8_t *destination, uint8_t *source,
+        size_t start, size_t encrypted_size);
 unsigned char *ssh_packet_encrypt(ssh_session session,
                                   void *packet,
                                   unsigned int len);

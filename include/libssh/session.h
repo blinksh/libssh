@@ -90,6 +90,12 @@ enum ssh_pending_call_e {
 #define SSH_OPT_FLAG_KBDINT_AUTH 0x4
 #define SSH_OPT_FLAG_GSSAPI_AUTH 0x8
 
+/* extensions flags */
+/* server-sig-algs extension */
+#define SSH_EXT_SIG_RSA_SHA256  0x01
+#define SSH_EXT_SIG_RSA_SHA512  0x02
+#define SSH_EXT_ALL             SSH_EXT_SIG_RSA_SHA256 | SSH_EXT_SIG_RSA_SHA512
+
 /* members that are common to ssh_session and ssh_bind */
 struct ssh_common_struct {
     struct error_struct error;
@@ -118,6 +124,9 @@ struct ssh_session_struct {
     /* session flags (SSH_SESSION_FLAG_*) */
     int flags;
 
+    /* Extensions negotiated using RFC 8308 */
+    uint32_t extensions;
+
     ssh_string banner; /* that's the issue banner from
                        the server */
     char *discon_msg; /* disconnect message from
@@ -132,11 +141,16 @@ struct ssh_session_struct {
     enum ssh_session_state_e session_state;
     int packet_state;
     enum ssh_dh_state_e dh_handshake_state;
-    enum ssh_auth_service_state_e auth_service_state;
-    enum ssh_auth_state_e auth_state;
     enum ssh_channel_request_state_e global_req_state;
     struct ssh_agent_state_struct *agent_state;
-    struct ssh_auth_auto_state_struct *auth_auto_state;
+
+    struct {
+        struct ssh_auth_auto_state_struct *auto_state;
+        enum ssh_auth_service_state_e service_state;
+        enum ssh_auth_state_e state;
+        uint32_t supported_methods;
+        uint32_t current_method;
+    } auth;
 
     /*
      * RFC 4253, 7.1: if the first_kex_packet_follows flag was set in
@@ -161,7 +175,7 @@ struct ssh_session_struct {
 /* keyb interactive data */
     struct ssh_kbdint_struct *kbdint;
     struct ssh_gssapi_struct *gssapi;
-    int version; /* 1 or 2 */
+
     /* server host keys */
     struct {
         ssh_key rsa_key;
@@ -171,8 +185,8 @@ struct ssh_session_struct {
         /* The type of host key wanted by client */
         enum ssh_keytypes_e hostkey;
     } srv;
+
     /* auths accepted by server */
-    int auth_methods;
     struct ssh_list *ssh_message_list; /* list of delayed SSH messages */
     int (*ssh_message_callback)( struct ssh_session_struct *session, ssh_message msg, void *userdata);
     void *ssh_message_callback_data;
@@ -198,6 +212,7 @@ struct ssh_session_struct {
         char *knownhosts;
         char *global_knownhosts;
         char *wanted_methods[10];
+        char *pubkey_accepted_types;
         char *ProxyCommand;
         char *custombanner;
         unsigned long timeout; /* seconds */
@@ -205,8 +220,6 @@ struct ssh_session_struct {
         unsigned int port;
         socket_t fd;
         int StrictHostKeyChecking;
-        int ssh2;
-        int ssh1;
         char compressionlevel;
         char *gss_server_identity;
         char *gss_client_identity;

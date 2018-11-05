@@ -21,8 +21,6 @@
  * along with the SSH Library; see the file COPYING.  If not, write to
  * the Free Software Foundation, Inc., 59 Temple Place - Suite 330, Boston,
  * MA 02111-1307, USA.
- *
- * vim: ts=2 sw=2 et cindent
  */
 
 #include "config.h"
@@ -1015,17 +1013,20 @@ int ssh_event_remove_connector(ssh_event event, ssh_connector connector){
  *                      fds before freeing the event object.
  *
  */
-void ssh_event_free(ssh_event event) {
-	int used, i;
-	ssh_poll_handle p;
-	if(event == NULL) {
+void ssh_event_free(ssh_event event)
+{
+    size_t used, i;
+    ssh_poll_handle p;
+
+    if(event == NULL) {
         return;
     }
-    if(event->ctx != NULL) {
+
+    if (event->ctx != NULL) {
         used = event->ctx->polls_used;
         for(i = 0; i < used; i++) {
-        	p = event->ctx->pollptrs[i];
-        	if(p->session != NULL){
+            p = event->ctx->pollptrs[i];
+            if (p->session != NULL) {
                 ssh_poll_ctx_remove(event->ctx, p);
                 ssh_poll_ctx_add(p->session->default_poll_ctx, p);
                 p->session = NULL;
@@ -1044,5 +1045,3 @@ void ssh_event_free(ssh_event event) {
 }
 
 /** @} */
-
-/* vim: set ts=4 sw=4 et cindent: */
