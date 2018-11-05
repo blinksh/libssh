@@ -16,7 +16,7 @@ option(SERVER_TESTING "Build with server tests; requires openssh and dropbear" O
 option(WITH_BENCHMARKS "Build benchmarks tools" OFF)
 option(WITH_EXAMPLES "Build examples" ON)
 option(WITH_NACL "Build with libnacl (curve25519)" ON)
-option(WITH_SYMBOL_VERSIONING "Build with symbol versioning" ON)
+option(WITH_SYMBOL_VERSIONING "Build with symbol versioning" OFF)
 option(WITH_ABI_BREAK "Allow ABI break" OFF)
 option(FUZZ_TESTING "Build with fuzzer for the server" OFF)
 option(PICKY_DEVELOPER "Build with picky developer flags" OFF)
