@@ -536,7 +536,7 @@ socket_t ssh_get_fd(ssh_session session) {
     return -1;
   }
 
-  return ssh_socket_get_fd_in(session->socket);
+  return ssh_socket_get_fd(session->socket);
 }
 
 /**
@@ -610,7 +610,7 @@ int ssh_handle_packets(ssh_session session, int timeout) {
   
     return ssh_socket_dispatch_wait(session->socket, timeout);
 #endif
-    ssh_poll_handle spoll_in,spoll_out;
+    ssh_poll_handle spoll;
     ssh_poll_ctx ctx;
     int tm = timeout;
     int rc;
@@ -619,17 +619,13 @@ int ssh_handle_packets(ssh_session session, int timeout) {
         return SSH_ERROR;
     }
 
-    spoll_in = ssh_socket_get_poll_handle_in(session->socket);
-    spoll_out = ssh_socket_get_poll_handle_out(session->socket);
-    ssh_poll_add_events(spoll_in, POLLIN);
-    ctx = ssh_poll_get_ctx(spoll_in);
+    spoll = ssh_socket_get_poll_handle(session->socket);
+    ssh_poll_add_events(spoll, POLLIN);
+    ctx = ssh_poll_get_ctx(spoll);
 
     if (!ctx) {
         ctx = ssh_poll_get_default_ctx(session);
-        ssh_poll_ctx_add(ctx, spoll_in);
-        if (spoll_in != spoll_out) {
-            ssh_poll_ctx_add(ctx, spoll_out);
-        }
+        ssh_poll_ctx_add(ctx, spoll);
     }
 
     if (timeout == SSH_TIMEOUT_USER) {

@@ -120,6 +120,7 @@ static int ssh_gssapi_send_response(ssh_session session, ssh_string oid){
         ssh_set_error_oom(session);
         return SSH_ERROR;
     }
+    session->auth.state = SSH_AUTH_STATE_GSSAPI_TOKEN;
 
     ssh_packet_send(session);
     SSH_LOG(SSH_LOG_PACKET,
@@ -960,8 +961,8 @@ SSH_PACKET_CALLBACK(ssh_packet_userauth_gssapi_token_client){
     }
 
     if (maj_stat == GSS_S_COMPLETE) {
-        session->auth.state = SSH_AUTH_STATE_NONE;
         ssh_gssapi_send_mic(session);
+        session->auth.state = SSH_AUTH_STATE_GSSAPI_MIC_SENT;
     }
 
     return SSH_PACKET_USED;

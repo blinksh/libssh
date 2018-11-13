@@ -430,6 +430,13 @@ void ssh_message_queue(ssh_session session, ssh_message message){
         }
         if (session->ssh_message_list != NULL) {
             ssh_list_append(session->ssh_message_list, message);
+        } else {
+            /* If the message list couldn't be allocated, the message can't be
+             * enqueued */
+            ssh_message_reply_default(message);
+            ssh_set_error_oom(session);
+            ssh_message_free(message);
+            return;
         }
     }
 }
@@ -697,6 +704,7 @@ SSH_PACKET_CALLBACK(ssh_packet_userauth_request){
   ssh_message msg = NULL;
   char *service = NULL;
   char *method = NULL;
+  int cmp;
   int rc;
 
   (void)user;
@@ -723,6 +731,13 @@ SSH_PACKET_CALLBACK(ssh_packet_userauth_request){
       service, method,
       msg->auth_request.username);
 
+  cmp = strcmp(service, "ssh-connection");
+  if (cmp != 0) {
+      SSH_LOG(SSH_LOG_WARNING,
+              "Invalid service request: %s",
+              service);
+      goto end;
+  }
 
   if (strcmp(method, "none") == 0) {
     msg->auth_request.method = SSH_AUTH_METHOD_NONE;
