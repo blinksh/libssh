@@ -311,7 +311,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
 - (int)wait:(int)milliseconds {
   NSDate * date;
   if (milliseconds <= 0) {
-    date = [NSDate distantFuture];
+    date = [NSDate dateWithTimeIntervalSinceNow: 0.5];
   } else {
     date = [NSDate dateWithTimeIntervalSinceNow:milliseconds / 1000.0];
   }
