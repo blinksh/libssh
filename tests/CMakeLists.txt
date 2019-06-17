@@ -8,9 +8,8 @@ set(TORTURE_LIBRARY torture)
 
 include_directories(
   ${LIBSSH_PUBLIC_INCLUDE_DIRS}
-  ${CMOCKA_INCLUDE_DIR}
   ${OPENSSL_INCLUDE_DIR}
-  ${GCRYPT_INCLUDE_DIR}
+  ${CMOCKA_INCLUDE_DIR}
   ${ZLIB_INCLUDE_DIR}
   ${CMAKE_BINARY_DIR}
   ${CMAKE_SOURCE_DIR}/src
@@ -150,6 +149,7 @@ endif (WITH_BENCHMARKS)
 
 if (WITH_SERVER AND SERVER_TESTING)
     add_subdirectory(pkd)
+    add_subdirectory(server)
 endif (WITH_SERVER AND SERVER_TESTING)
 
 if (FUZZ_TESTING)
