@@ -68,6 +68,15 @@
  #include <netdb.h>
 #endif /* _WIN32 */
 
+#if defined(__APPLE__) && defined(__MACH__)
+  /* Apple OSX and iOS (Darwin) */
+  #include <Availability.h>
+  #if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070 || __IPHONE_OS_VERSION_MIN_REQUIRED >= 50000
+    #include <dispatch/dispatch.h>
+    #define LIBSSH_HAVE_DISPATCH 1
+  #endif
+#endif
+
 #define SSH_STRINGIFY(s) SSH_TOSTRING(s)
 #define SSH_TOSTRING(s) #s
 
@@ -827,6 +836,11 @@ LIBSSH_API int ssh_buffer_add_data(ssh_buffer buffer, const void *data, uint32_t
 LIBSSH_API uint32_t ssh_buffer_get_data(ssh_buffer buffer, void *data, uint32_t requestedlen);
 LIBSSH_API void *ssh_buffer_get(ssh_buffer buffer);
 LIBSSH_API uint32_t ssh_buffer_get_len(ssh_buffer buffer);
+
+#ifdef LIBSSH_HAVE_DISPATCH
+  LIBSSH_API long ssh_session_wait(ssh_session session, dispatch_time_t time);
+  int ssh_client_send_keepalive(ssh_session session);
+#endif
 
 #ifndef LIBSSH_LEGACY_0_4
 #include "libssh/legacy.h"
