@@ -851,12 +851,12 @@ ssh_key pki_private_key_from_base64(const char *b64_key,
     BIO_free(mem);
     
     if (evp == NULL) {
+//    type = pki_privatekey_type_from_string(b64_key);
+//    if (type == SSH_KEYTYPE_UNKNOWN) {
         SSH_LOG(SSH_LOG_WARN, "Unknown or invalid private key.");
         return NULL;
     }
-    
-    //type = EVP_PKEY_type(evp);
-    
+
     switch (evp->type) {
         case EVP_PKEY_DSA:
             type = SSH_KEYTYPE_DSS;
@@ -878,6 +878,7 @@ ssh_key pki_private_key_from_base64(const char *b64_key,
             /* case SSH_KEYTYPE_DSS_CERT01: */
             /* case SSH_KEYTYPE_RSA_CERT01: */
             /* case SSH_KEYTYPE_UNKNOWN: */
+            type = pki_privatekey_type_from_string(b64_key);
             SSH_LOG(SSH_LOG_WARN, "Unkown or invalid private key type %d", type);
             return NULL;
     }
