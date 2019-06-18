@@ -816,93 +816,72 @@ err:
 ssh_key pki_private_key_from_base64(const char *b64_key,
                                     const char *passphrase,
                                     ssh_auth_callback auth_fn,
-                                    void *auth_data)
-{
+                                    void *auth_data) {
     BIO *mem = NULL;
     DSA *dsa = NULL;
     RSA *rsa = NULL;
+    EVP_PKEY *evp = NULL;
     ed25519_privkey *ed25519 = NULL;
-    ssh_key key = NULL;
-    enum ssh_keytypes_e type = SSH_KEYTYPE_UNKNOWN;
+    ssh_key key;
+    enum ssh_keytypes_e type;
 #ifdef HAVE_OPENSSL_ECC
     EC_KEY *ecdsa = NULL;
 #else
     void *ecdsa = NULL;
 #endif
-    EVP_PKEY *pkey = NULL;
 
+    /* needed for openssl initialization */
+    if (ssh_init() < 0) {
+        return NULL;
+    }
+    
     mem = BIO_new_mem_buf((void*)b64_key, -1);
-
+    
     if (passphrase == NULL) {
         if (auth_fn) {
             struct pem_get_password_struct pgp = { auth_fn, auth_data };
-
-            pkey = PEM_read_bio_PrivateKey(mem, NULL, pem_get_password, &pgp);
+            evp = PEM_read_bio_PrivateKey(mem, NULL, pem_get_password, &pgp);
         } else {
-            /* openssl uses its own callback to get the passphrase here */
-            pkey = PEM_read_bio_PrivateKey(mem, NULL, NULL, NULL);
+            evp = PEM_read_bio_PrivateKey(mem, NULL, NULL, NULL);
         }
     } else {
-        pkey = PEM_read_bio_PrivateKey(mem, NULL, NULL, (void *) passphrase);
+        evp = PEM_read_bio_PrivateKey(mem, NULL, NULL, (void *) passphrase);
     }
-
+    
     BIO_free(mem);
-
-    if (pkey == NULL) {
-        SSH_LOG(SSH_LOG_WARN,
-                "Parsing private key: %s",
-                ERR_error_string(ERR_get_error(), NULL));
+    
+    if (evp == NULL) {
+        SSH_LOG(SSH_LOG_WARN, "Unknown or invalid private key.");
         return NULL;
     }
-    switch (EVP_PKEY_base_id(pkey)) {
-    case EVP_PKEY_DSA:
-        dsa = EVP_PKEY_get1_DSA(pkey);
-        if (dsa == NULL) {
-            SSH_LOG(SSH_LOG_WARN,
-                    "Parsing private key: %s",
-                    ERR_error_string(ERR_get_error(),NULL));
-            return NULL;
-        }
-        type = SSH_KEYTYPE_DSS;
-        break;
-    case EVP_PKEY_RSA:
-        rsa = EVP_PKEY_get1_RSA(pkey);
-        if (rsa == NULL) {
-            SSH_LOG(SSH_LOG_WARN,
-                    "Parsing private key: %s",
-                    ERR_error_string(ERR_get_error(),NULL));
-            return NULL;
-        }
-        type = SSH_KEYTYPE_RSA;
-        break;
-    case EVP_PKEY_EC:
+    
+    //type = EVP_PKEY_type(evp);
+    
+    switch (evp->type) {
+        case EVP_PKEY_DSA:
+            type = SSH_KEYTYPE_DSS;
+            dsa = EVP_PKEY_get1_DSA(evp);
+            break;
+        case EVP_PKEY_RSA:
+            type = SSH_KEYTYPE_RSA;
+            rsa = EVP_PKEY_get1_RSA(evp);
+            break;
+        case EVP_PKEY_EC:
 #ifdef HAVE_OPENSSL_ECC
-        ecdsa = EVP_PKEY_get1_EC_KEY(pkey);
-        if (ecdsa == NULL) {
-            SSH_LOG(SSH_LOG_WARN,
-                    "Parsing private key: %s",
-                    ERR_error_string(ERR_get_error(), NULL));
-            return NULL;
-        }
-
-        /* pki_privatekey_type_from_string always returns P256 for ECDSA
-         * keys, so we need to figure out the correct type here */
-        type = pki_key_ecdsa_to_key_type(ecdsa);
-        if (type == SSH_KEYTYPE_UNKNOWN) {
-            SSH_LOG(SSH_LOG_WARN, "Invalid private key.");
-            goto fail;
-        }
-
-        break;
+            type = SSH_KEYTYPE_ECDSA;
+            ecdsa = EVP_PKEY_get1_EC_KEY(evp);
+            break;
 #endif
-    default:
-        EVP_PKEY_free(pkey);
-        SSH_LOG(SSH_LOG_WARN, "Unknown or invalid private key type %d",
-                EVP_PKEY_base_id(pkey));
-        return NULL;
+        case NID_undef:
+            /* case SSH_KEYTYPE_ED25519: */
+            /*     /\* Cannot open ed25519 keys with libcrypto *\/ */
+            /* case SSH_KEYTYPE_DSS_CERT01: */
+            /* case SSH_KEYTYPE_RSA_CERT01: */
+            /* case SSH_KEYTYPE_UNKNOWN: */
+            SSH_LOG(SSH_LOG_WARN, "Unkown or invalid private key type %d", type);
+            return NULL;
     }
-    EVP_PKEY_free(pkey);
-
+    
     key = ssh_key_new();
     if (key == NULL) {
         goto fail;
@@ -916,8 +895,9 @@ ssh_key pki_private_key_from_base64(const char *b64_key,
     key->ecdsa = ecdsa;
     key->ed25519_privkey = ed25519;
 #ifdef HAVE_OPENSSL_ECC
-    if (is_ecdsa_key_type(key->type)) {
+    if (key->type == SSH_KEYTYPE_ECDSA) {
         key->ecdsa_nid = pki_key_ecdsa_to_nid(key->ecdsa);
+        key->type_c = pki_key_ecdsa_nid_to_name(key->ecdsa_nid);
     }
 #endif
 
