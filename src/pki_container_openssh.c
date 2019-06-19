@@ -39,8 +39,6 @@
 #include "libssh/buffer.h"
 
 
-void * (*pki_import_privkey_blob_hook)(enum ssh_keytypes_e type, u_char *blob, u_int blen) = NULL;
-
 /**
  * @internal
  *
@@ -81,22 +79,6 @@ static int pki_openssh_import_privkey_blob(ssh_buffer key_blob_buffer,
         return SSH_ERROR;
     }
     SAFE_FREE(type_s);
-
-
-    if (pki_import_privkey_blob_hook != NULL && (type == SSH_KEYTYPE_RSA || type == SSH_KEYTYPE_DSS)) {
-      u_char *blob = ssh_buffer_get(key_blob_buffer);
-      u_int blen = ssh_buffer_get_len(key_blob_buffer);
-      void *result = pki_import_privkey_blob_hook(type, blob, blen);
-      if (result != NULL) {
-        if (type == SSH_KEYTYPE_RSA) {
-          key->rsa = (RSA *)result;
-        } else if (type == SSH_KEYTYPE_DSS) {
-          key->dsa = (DSA *)result;
-        }
-        *pkey = key;
-        return SSH_OK;
-      }
-    }
 
     rc = pki_import_privkey_buffer(type, key_blob_buffer, &key);
     if (rc != SSH_OK) {

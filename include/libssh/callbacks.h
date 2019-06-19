@@ -992,7 +992,6 @@ LIBSSH_API ssh_logging_callback ssh_get_log_callback(void);
 
 //external thread
 extern __thread void (*thread_ssh_execute_command)(const char *command, socket_t in, socket_t out);
-extern void * (*pki_import_privkey_blob_hook)(enum ssh_keytypes_e type, u_char *blob, u_int blen) = NULL;
 
 /** @} */
 #ifdef __cplusplus
