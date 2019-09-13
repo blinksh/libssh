@@ -135,6 +135,9 @@ struct ssh_socket_struct {
     [_inputStream removeFromRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
     [_outputStream removeFromRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
 
+    [_outputStream setDelegate: nil];
+    [_inputStream setDelegate: nil];
+
     _outputStream = nil;
     _inputStream = nil;
 
@@ -524,7 +527,7 @@ void ssh_socket_reset(ssh_socket s){
   s->fd_is_socket = 1;
   s->data_except = 0;
 #if HAVE_DISPATCH_H
-  /* IO *arcWillFreeMe = */ (__bridge_transfer IO*)s->io;
+  IO *io = (__bridge_transfer IO*)s->io;
   s->io = (__bridge_retained void*)[[IO alloc] initWithSSHSocket:s];
 #else
   s->read_wontblock = 0;
