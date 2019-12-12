@@ -201,13 +201,18 @@ struct sftp_statvfs_struct {
 };
 
 /**
- * @brief Start a new sftp session.
+ * @brief Creates a new sftp session.
+ *
+ * This function creates a new sftp session and allocates a new sftp channel
+ * with the server inside of the provided ssh session. This function call is
+ * usually followed by the sftp_init(), which initializes SFTP protocol itself.
  *
  * @param session       The ssh session to use.
  *
  * @return              A new sftp session or NULL on error.
  *
  * @see sftp_free()
+ * @see sftp_init()
  */
 LIBSSH_API sftp_session sftp_new(ssh_session session);
 
@@ -232,7 +237,10 @@ LIBSSH_API sftp_session sftp_new_channel(ssh_session session, ssh_channel channe
 LIBSSH_API void sftp_free(sftp_session sftp);
 
 /**
- * @brief Initialize the sftp session with the server.
+ * @brief Initialize the sftp protocol with the server.
+ *
+ * This function involves the SFTP protocol initialization (as described
+ * in the SFTP specification), including the version and extensions negotiation.
  *
  * @param sftp          The sftp session to initialize.
  *
@@ -862,13 +870,6 @@ LIBSSH_API int sftp_server_init(sftp_session sftp);
 LIBSSH_API void sftp_server_free(sftp_session sftp);
 #endif  /* WITH_SERVER */
 
-/* this is not a public interface */
-#define SFTP_HANDLES 256
-sftp_packet sftp_packet_read(sftp_session sftp);
-int sftp_packet_write(sftp_session sftp,uint8_t type, ssh_buffer payload);
-void sftp_packet_free(sftp_packet packet);
-int buffer_add_attributes(ssh_buffer buffer, sftp_attributes attr);
-sftp_attributes sftp_parse_attr(sftp_session session, ssh_buffer buf,int expectname);
 /* sftpserver.c */
 
 LIBSSH_API sftp_client_message sftp_get_client_message(sftp_session sftp);

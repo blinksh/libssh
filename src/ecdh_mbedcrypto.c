@@ -113,7 +113,7 @@ int ssh_client_ecdh_init(ssh_session session)
 
 out:
     mbedtls_ecp_group_free(&grp);
-    ssh_string_free(client_pubkey);
+    SSH_STRING_FREE(client_pubkey);
 
     return rc;
 }
@@ -188,6 +188,7 @@ SSH_PACKET_CALLBACK(ssh_packet_server_ecdh_init){
     ssh_string q_s_string = NULL;
     mbedtls_ecp_group grp;
     ssh_key privkey = NULL;
+    enum ssh_digest_e digest = SSH_DIGEST_AUTO;
     ssh_string sig_blob = NULL;
     ssh_string pubkey_blob = NULL;
     int rc;
@@ -250,7 +251,7 @@ SSH_PACKET_CALLBACK(ssh_packet_server_ecdh_init){
     }
 
     /* privkey is not allocated */
-    rc = ssh_get_key_params(session, &privkey);
+    rc = ssh_get_key_params(session, &privkey, &digest);
     if (rc == SSH_ERROR) {
         rc = SSH_ERROR;
         goto out;
@@ -263,7 +264,7 @@ SSH_PACKET_CALLBACK(ssh_packet_server_ecdh_init){
         goto out;
     }
 
-    sig_blob = ssh_srv_pki_do_sign_sessionid(session, privkey);
+    sig_blob = ssh_srv_pki_do_sign_sessionid(session, privkey, digest);
     if (sig_blob == NULL) {
         ssh_set_error(session, SSH_FATAL, "Could not sign the session id");
         rc = SSH_ERROR;
@@ -273,7 +274,7 @@ SSH_PACKET_CALLBACK(ssh_packet_server_ecdh_init){
     rc = ssh_dh_get_next_server_publickey_blob(session, &pubkey_blob);
     if (rc != SSH_OK) {
         ssh_set_error(session, SSH_FATAL, "Could not export server public key");
-        ssh_string_free(sig_blob);
+        SSH_STRING_FREE(sig_blob);
         goto out;
     }
 
@@ -283,8 +284,8 @@ SSH_PACKET_CALLBACK(ssh_packet_server_ecdh_init){
                          q_s_string, /* ecdh public key */
                          sig_blob); /* signature blob */
 
-    ssh_string_free(sig_blob);
-    ssh_string_free(pubkey_blob);
+    SSH_STRING_FREE(sig_blob);
+    SSH_STRING_FREE(pubkey_blob);
 
     if (rc != SSH_OK) {
         ssh_set_error_oom(session);

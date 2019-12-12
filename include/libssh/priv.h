@@ -221,7 +221,17 @@ int gettimeofday(struct timeval *__p, void *__t);
 struct ssh_common_struct;
 struct ssh_kex_struct;
 
-int ssh_get_key_params(ssh_session session, ssh_key *privkey);
+enum ssh_digest_e {
+    SSH_DIGEST_AUTO=0,
+    SSH_DIGEST_SHA1=1,
+    SSH_DIGEST_SHA256,
+    SSH_DIGEST_SHA384,
+    SSH_DIGEST_SHA512,
+};
+
+int ssh_get_key_params(ssh_session session,
+                       ssh_key *privkey,
+                       enum ssh_digest_e *digest);
 
 /* LOGGING */
 void ssh_log_function(int verbosity,
@@ -277,7 +287,7 @@ socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
 
 /* in base64.c */
 ssh_buffer base64_to_bin(const char *source);
-unsigned char *bin_to_base64(const unsigned char *source, int len);
+uint8_t *bin_to_base64(const uint8_t *source, size_t len);
 
 /* gzip.c */
 int compress_buffer(ssh_session session,ssh_buffer buf);

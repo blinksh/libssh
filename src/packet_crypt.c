@@ -103,6 +103,9 @@ int ssh_packet_decrypt(ssh_session session,
     }
 
     crypto = ssh_packet_get_current_crypto(session, SSH_DIRECTION_IN);
+    if (crypto == NULL) {
+        return SSH_ERROR;
+    }
     cipher = crypto->in_cipher;
 
     if (encrypted_size % cipher->blocksize != 0) {
@@ -196,11 +199,11 @@ unsigned char *ssh_packet_encrypt(ssh_session session, void *data, uint32_t len)
           hmac_final(ctx, crypto->hmacbuf, &finallen);
       }
 #ifdef DEBUG_CRYPTO
-      ssh_print_hexa("mac: ",data,hmac_digest_len(type));
+      ssh_log_hexdump("mac: ", data, len);
       if (finallen != hmac_digest_len(type)) {
-        printf("Final len is %d\n",finallen);
+          printf("Final len is %d\n", finallen);
       }
-      ssh_print_hexa("Packet hmac", crypto->hmacbuf, hmac_digest_len(type));
+      ssh_log_hexdump("Packet hmac", crypto->hmacbuf, hmac_digest_len(type));
 #endif
   }
   explicit_bzero(out, len);
@@ -252,6 +255,10 @@ int ssh_packet_hmac_verify(ssh_session session,
   }
 
   crypto = ssh_packet_get_current_crypto(session, SSH_DIRECTION_IN);
+  if (crypto == NULL) {
+      return SSH_ERROR;
+  }
+
   ctx = hmac_init(crypto->decryptMAC, hmac_digest_len(type), type);
   if (ctx == NULL) {
     return -1;
@@ -264,9 +271,9 @@ int ssh_packet_hmac_verify(ssh_session session,
   hmac_final(ctx, hmacbuf, &hmaclen);
 
 #ifdef DEBUG_CRYPTO
-  ssh_print_hexa("received mac",mac,hmaclen);
-  ssh_print_hexa("Computed mac",hmacbuf,hmaclen);
-  ssh_print_hexa("seq",(unsigned char *)&seq,sizeof(uint32_t));
+  ssh_log_hexdump("received mac",mac,hmaclen);
+  ssh_log_hexdump("Computed mac",hmacbuf,hmaclen);
+  ssh_log_hexdump("seq",(unsigned char *)&seq,sizeof(uint32_t));
 #endif
   if (secure_memcmp(mac, hmacbuf, hmaclen) == 0) {
     return 0;

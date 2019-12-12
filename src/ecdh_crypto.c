@@ -101,7 +101,7 @@ int ssh_client_ecdh_init(ssh_session session){
   rc = ssh_buffer_add_ssh_string(session->out_buffer,client_pubkey);
   if (rc < 0) {
       EC_KEY_free(key);
-      ssh_string_free(client_pubkey);
+      SSH_STRING_FREE(client_pubkey);
       return SSH_ERROR;
   }
 
@@ -181,9 +181,9 @@ int ecdh_build_k(ssh_session session) {
   session->next_crypto->ecdh_privkey = NULL;
 
 #ifdef DEBUG_CRYPTO
-    ssh_print_hexa("Session server cookie",
+    ssh_log_hexdump("Session server cookie",
                    session->next_crypto->server_kex.cookie, 16);
-    ssh_print_hexa("Session client cookie",
+    ssh_log_hexdump("Session client cookie",
                    session->next_crypto->client_kex.cookie, 16);
     ssh_print_bignum("Shared secret key", session->next_crypto->shared_secret);
 #endif
@@ -206,6 +206,7 @@ SSH_PACKET_CALLBACK(ssh_packet_server_ecdh_init){
     bignum_CTX ctx;
     /* SSH host keys (rsa,dsa,ecdsa) */
     ssh_key privkey;
+    enum ssh_digest_e digest = SSH_DIGEST_AUTO;
     ssh_string sig_blob = NULL;
     ssh_string pubkey_blob = NULL;
     int curve;
@@ -277,7 +278,7 @@ SSH_PACKET_CALLBACK(ssh_packet_server_ecdh_init){
     }
 
     /* privkey is not allocated */
-    rc = ssh_get_key_params(session, &privkey);
+    rc = ssh_get_key_params(session, &privkey, &digest);
     if (rc == SSH_ERROR) {
         goto error;
     }
@@ -288,7 +289,7 @@ SSH_PACKET_CALLBACK(ssh_packet_server_ecdh_init){
         goto error;
     }
 
-    sig_blob = ssh_srv_pki_do_sign_sessionid(session, privkey);
+    sig_blob = ssh_srv_pki_do_sign_sessionid(session, privkey, digest);
     if (sig_blob == NULL) {
         ssh_set_error(session, SSH_FATAL, "Could not sign the session id");
         goto error;
@@ -297,7 +298,7 @@ SSH_PACKET_CALLBACK(ssh_packet_server_ecdh_init){
     rc = ssh_dh_get_next_server_publickey_blob(session, &pubkey_blob);
     if (rc != SSH_OK) {
         ssh_set_error(session, SSH_FATAL, "Could not export server public key");
-        ssh_string_free(sig_blob);
+        SSH_STRING_FREE(sig_blob);
         return SSH_ERROR;
     }
 
@@ -308,8 +309,8 @@ SSH_PACKET_CALLBACK(ssh_packet_server_ecdh_init){
                          q_s_string, /* ecdh public key */
                          sig_blob); /* signature blob */
 
-    ssh_string_free(sig_blob);
-    ssh_string_free(pubkey_blob);
+    SSH_STRING_FREE(sig_blob);
+    SSH_STRING_FREE(pubkey_blob);
 
     if (rc != SSH_OK) {
         ssh_set_error_oom(session);

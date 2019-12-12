@@ -88,7 +88,7 @@
 /* libssh version */
 #define LIBSSH_VERSION_MAJOR  0
 #define LIBSSH_VERSION_MINOR  9
-#define LIBSSH_VERSION_MICRO  0
+#define LIBSSH_VERSION_MICRO  3
 
 #define LIBSSH_VERSION_INT SSH_VERSION_INT(LIBSSH_VERSION_MAJOR, \
                                            LIBSSH_VERSION_MINOR, \
@@ -177,13 +177,13 @@ enum ssh_auth_e {
 };
 
 /* auth flags */
-#define SSH_AUTH_METHOD_UNKNOWN 0
-#define SSH_AUTH_METHOD_NONE 0x0001
-#define SSH_AUTH_METHOD_PASSWORD 0x0002
-#define SSH_AUTH_METHOD_PUBLICKEY 0x0004
-#define SSH_AUTH_METHOD_HOSTBASED 0x0008
-#define SSH_AUTH_METHOD_INTERACTIVE 0x0010
-#define SSH_AUTH_METHOD_GSSAPI_MIC 0x0020
+#define SSH_AUTH_METHOD_UNKNOWN     0x0000u
+#define SSH_AUTH_METHOD_NONE        0x0001u
+#define SSH_AUTH_METHOD_PASSWORD    0x0002u
+#define SSH_AUTH_METHOD_PUBLICKEY   0x0004u
+#define SSH_AUTH_METHOD_HOSTBASED   0x0008u
+#define SSH_AUTH_METHOD_INTERACTIVE 0x0010u
+#define SSH_AUTH_METHOD_GSSAPI_MIC  0x0020u
 
 /* messages */
 enum ssh_requests_e {
@@ -450,6 +450,7 @@ enum ssh_scp_request_types {
 enum ssh_connector_flags_e {
     /** Only the standard stream of the channel */
     SSH_CONNECTOR_STDOUT = 1,
+    SSH_CONNECTOR_STDINOUT = 1,
     /** Only the exception stream of the channel */
     SSH_CONNECTOR_STDERR = 2,
     /** Merge both standard and exception streams */

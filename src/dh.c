@@ -365,7 +365,7 @@ SSH_PACKET_CALLBACK(ssh_packet_client_dh_reply){
       goto error;
   }
   rc = ssh_dh_import_next_pubkey_blob(session, pubkey_blob);
-  ssh_string_free(pubkey_blob);
+  SSH_STRING_FREE(pubkey_blob);
   if (rc != 0) {
       goto error;
   }
@@ -373,6 +373,7 @@ SSH_PACKET_CALLBACK(ssh_packet_client_dh_reply){
   rc = ssh_dh_compute_shared_secret(session->next_crypto->dh_ctx,
                                     DH_CLIENT_KEYPAIR, DH_SERVER_KEYPAIR,
                                     &session->next_crypto->shared_secret);
+  ssh_dh_debug_crypto(session->next_crypto);
   if (rc == SSH_ERROR){
     ssh_set_error(session, SSH_FATAL, "Could not generate shared secret");
     goto error;
@@ -430,6 +431,7 @@ int ssh_server_dh_process_init(ssh_session session, ssh_buffer packet)
 {
     struct ssh_crypto_struct *crypto = session->next_crypto;
     ssh_key privkey = NULL;
+    enum ssh_digest_e digest = SSH_DIGEST_AUTO;
     ssh_string sig_blob = NULL;
     ssh_string pubkey_blob = NULL;
     bignum client_pubkey;
@@ -455,13 +457,14 @@ int ssh_server_dh_process_init(ssh_session session, ssh_buffer packet)
         goto error;
     }
 
-    rc = ssh_get_key_params(session, &privkey);
+    rc = ssh_get_key_params(session, &privkey, &digest);
     if (rc != SSH_OK) {
         goto error;
     }
     rc = ssh_dh_compute_shared_secret(crypto->dh_ctx,
                                       DH_SERVER_KEYPAIR, DH_CLIENT_KEYPAIR,
                                       &crypto->shared_secret);
+    ssh_dh_debug_crypto(crypto);
     if (rc == SSH_ERROR) {
         ssh_set_error(session, SSH_FATAL, "Could not generate shared secret");
         goto error;
@@ -471,7 +474,7 @@ int ssh_server_dh_process_init(ssh_session session, ssh_buffer packet)
         ssh_set_error(session, SSH_FATAL, "Could not create a session id");
         goto error;
     }
-    sig_blob = ssh_srv_pki_do_sign_sessionid(session, privkey);
+    sig_blob = ssh_srv_pki_do_sign_sessionid(session, privkey, digest);
     if (sig_blob == NULL) {
         ssh_set_error(session, SSH_FATAL, "Could not sign the session id");
         goto error;
@@ -693,13 +696,16 @@ static char *ssh_get_b64_unpadded(const unsigned char *hash, size_t len)
 /**
  * @brief Get a hash as a human-readable hex- or base64-string.
  *
- * This gets an allocated fingerprint hash. It is a hex strings if the given
- * hash is a md5 sum.  If it is a SHA sum, it will return an unpadded base64
- * strings.  Either way, the output is prepended by the hash-type.
+ * This gets an allocated fingerprint hash.  If it is a SHA sum, it will
+ * return an unpadded base64 strings.  If it is a MD5 sum, it will return hex
+ * string. Either way, the output is prepended by the hash-type.
  *
- * @param  type         Which sort of hash is given.
+ * @warning Do NOT use MD5 or SHA1! Those hash functions are being deprecated.
  *
- * @param  hash         What should be converted to a base64 string.
+ * @param  type         Which sort of hash is given, use
+ *                      SSH_PUBLICKEY_HASH_SHA256 or better.
+ *
+ * @param  hash         The hash to be converted to fingerprint.
  *
  * @param  len          Length of the buffer to convert.
  *
@@ -766,13 +772,13 @@ char *ssh_get_fingerprint_hash(enum ssh_publickey_hash_type type,
 /**
  * @brief Print a hash as a human-readable hex- or base64-string.
  *
- * This function prints hex strings if the given hash is a md5 sum.
- * But prints unpadded base64 strings for sha sums.
- * Either way, the output is prepended by the hash-type.
+ * This prints an unpadded base64 strings for SHA sums and hex strings for MD5
+ * sum.  Either way, the output is prepended by the hash-type.
  *
- * @param  type         Which sort of hash is given.
+ * @param  type         Which sort of hash is given. Use
+ *                      SSH_PUBLICKEY_HASH_SHA256 or better.
  *
- * @param  hash         What should be converted to a base64 string.
+ * @param  hash         The hash to be converted to fingerprint.
  *
  * @param  len          Length of the buffer to convert.
  *

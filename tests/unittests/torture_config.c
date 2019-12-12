@@ -5,6 +5,8 @@
 #include "torture.h"
 #include "libssh/options.h"
 #include "libssh/session.h"
+#include "libssh/config_parser.h"
+#include "match.c"
 
 extern LIBSSH_THREAD int ssh_log_level;
 
@@ -440,6 +442,8 @@ static void torture_config_unknown(void **state) {
 static void torture_config_match(void **state)
 {
     ssh_session session = *state;
+    char *localuser = NULL;
+    char config[1024];
     int ret = 0;
 
     /* Without any settings we should get all-matched.com hostname */
@@ -531,6 +535,19 @@ static void torture_config_match(void **state)
     assert_ssh_return_code(session, ret);
     assert_string_equal(session->opts.host, "canonical.com");
 
+    localuser = ssh_get_local_username();
+    assert_non_null(localuser);
+    snprintf(config, sizeof(config),
+             "Match localuser %s\n"
+             "\tHostName otherhost\n"
+             "", localuser);
+    free(localuser);
+    torture_write_file(LIBSSH_TESTCONFIG10, config);
+    torture_reset_config(session);
+    ret = ssh_config_parse_file(session, LIBSSH_TESTCONFIG10);
+    assert_ssh_return_code(session, ret);
+    assert_string_equal(session->opts.host, "otherhost");
+
     /* Try to create some invalid configurations */
     /* Missing argument to Match*/
     torture_write_file(LIBSSH_TESTCONFIG10,
@@ -550,7 +567,7 @@ static void torture_config_match(void **state)
     ret = ssh_config_parse_file(session, LIBSSH_TESTCONFIG10);
     assert_ssh_return_code_equal(session, ret, SSH_ERROR);
 
-    /* Missing argument to unsupported option localuser */
+    /* Missing argument to option localuser */
     torture_write_file(LIBSSH_TESTCONFIG10,
                        "Match localuser\n"
                        "\tUser localuser2\n"
@@ -559,7 +576,7 @@ static void torture_config_match(void **state)
     ret = ssh_config_parse_file(session, LIBSSH_TESTCONFIG10);
     assert_ssh_return_code_equal(session, ret, SSH_ERROR);
 
-    /* Missing argument to option user*/
+    /* Missing argument to option user */
     torture_write_file(LIBSSH_TESTCONFIG10,
                        "Match user\n"
                        "\tUser user2\n"
@@ -892,6 +909,89 @@ static void torture_config_pubkeyacceptedkeytypes(void **state)
     }
 }
 
+/* match_pattern() sanity tests
+ */
+static void torture_config_match_pattern(void **state)
+{
+    int rv = 0;
+
+    (void) state;
+
+    /* Simple test "a" matches "a" */
+    rv = match_pattern("a", "a", MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 1);
+
+    /* Simple test "a" does not match "b" */
+    rv = match_pattern("a", "b", MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 0);
+
+    /* NULL arguments are correctly handled */
+    rv = match_pattern("a", NULL, MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 0);
+    rv = match_pattern(NULL, "a", MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 0);
+
+    /* Simple wildcard ? is handled in pattern */
+    rv = match_pattern("a", "?", MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 1);
+    rv = match_pattern("aa", "?", MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 0);
+    rv = match_pattern("?", "a", MAX_MATCH_RECURSION); /* Wildcard in search string */
+    assert_int_equal(rv, 0);
+    rv = match_pattern("?", "?", MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 1);
+
+    /* Simple wildcard * is handled in pattern */
+    rv = match_pattern("a", "*", MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 1);
+    rv = match_pattern("aa", "*", MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 1);
+    rv = match_pattern("*", "a", MAX_MATCH_RECURSION); /* Wildcard in search string */
+    assert_int_equal(rv, 0);
+    rv = match_pattern("*", "*", MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 1);
+
+    /* More complicated patterns */
+    rv = match_pattern("a", "*a", MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 1);
+    rv = match_pattern("a", "a*", MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 1);
+    rv = match_pattern("abababc", "*abc", MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 1);
+    rv = match_pattern("ababababca", "*abc", MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 0);
+    rv = match_pattern("ababababca", "*abc*", MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 1);
+
+    /* Multiple wildcards in row */
+    rv = match_pattern("aa", "??", MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 1);
+    rv = match_pattern("bba", "??a", MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 1);
+    rv = match_pattern("aaa", "**a", MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 1);
+    rv = match_pattern("bbb", "**a", MAX_MATCH_RECURSION);
+    assert_int_equal(rv, 0);
+
+    /* Consecutive asterisks do not make sense and do not need to recurse */
+    rv = match_pattern("hostname", "**********pattern", 5);
+    assert_int_equal(rv, 0);
+    rv = match_pattern("hostname", "pattern**********", 5);
+    assert_int_equal(rv, 0);
+    rv = match_pattern("pattern", "***********pattern", 5);
+    assert_int_equal(rv, 1);
+    rv = match_pattern("pattern", "pattern***********", 5);
+    assert_int_equal(rv, 1);
+
+    /* Limit the maximum recursion */
+    rv = match_pattern("hostname", "*p*a*t*t*e*r*n*", 5);
+    assert_int_equal(rv, 0);
+    rv = match_pattern("pattern", "*p*a*t*t*e*r*n*", 5); /* Too much recursion */
+    assert_int_equal(rv, 0);
+
+}
+
+
 int torture_run_tests(void) {
     int rc;
     struct CMUnitTest tests[] = {
@@ -905,6 +1005,7 @@ int torture_run_tests(void) {
         cmocka_unit_test(torture_config_proxyjump),
         cmocka_unit_test(torture_config_rekey),
         cmocka_unit_test(torture_config_pubkeyacceptedkeytypes),
+        cmocka_unit_test(torture_config_match_pattern),
     };
 
 

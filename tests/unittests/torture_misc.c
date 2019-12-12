@@ -19,6 +19,7 @@
 
 #define TORTURE_TEST_DIR "/usr/local/bin/truc/much/.."
 
+const char template[] = "temp_dir_XXXXXX";
 
 static int setup(void **state)
 {
@@ -192,6 +193,18 @@ static void torture_path_expand_known_hosts(void **state) {
     free(tmp);
 }
 
+static void torture_path_expand_percent(void **state) {
+    ssh_session session = *state;
+    char *tmp;
+
+    session->opts.sshdir = strdup("/home/guru/.ssh");
+
+    tmp = ssh_path_expand_escape(session, "%d/config%%1");
+    assert_non_null(tmp);
+    assert_string_equal(tmp, "/home/guru/.ssh/config%1");
+    free(tmp);
+}
+
 static void torture_timeout_elapsed(void **state){
     struct ssh_timestamp ts;
     (void) state;
@@ -351,6 +364,297 @@ static void torture_ssh_analyze_banner(void **state) {
     ssh_free(session);
 }
 
+static void torture_ssh_dir_writeable(UNUSED_PARAM(void **state))
+{
+    char *tmp_dir = NULL;
+    int rc = 0;
+    FILE *file = NULL;
+    char buffer[256];
+
+    tmp_dir = torture_make_temp_dir(template);
+    assert_non_null(tmp_dir);
+
+    rc = ssh_dir_writeable(tmp_dir);
+    assert_int_equal(rc, 1);
+
+    /* Create a file */
+    snprintf(buffer, sizeof(buffer), "%s/a", tmp_dir);
+
+    file = fopen(buffer, "w");
+    assert_non_null(file);
+
+    fprintf(file, "Hello world!\n");
+    fclose(file);
+
+    /* Negative test for checking a normal file */
+    rc = ssh_dir_writeable(buffer);
+    assert_int_equal(rc, 0);
+
+    /* Negative test for non existent file */
+    snprintf(buffer, sizeof(buffer), "%s/b", tmp_dir);
+    rc = ssh_dir_writeable(buffer);
+    assert_int_equal(rc, 0);
+
+#ifndef _WIN32
+    /* Negative test for directory without write permission */
+    rc = ssh_mkdir(buffer, 0400);
+    assert_return_code(rc, errno);
+
+    rc = ssh_dir_writeable(buffer);
+    assert_int_equal(rc, 0);
+#endif
+
+    torture_rmdirs(tmp_dir);
+
+    SAFE_FREE(tmp_dir);
+}
+
+static void torture_ssh_mkdirs(UNUSED_PARAM(void **state))
+{
+    char *tmp_dir = NULL;
+    char *cwd = NULL;
+    char buffer[256];
+
+    ssize_t count = 0;
+
+    int rc;
+
+    /* Get current working directory */
+    cwd = torture_get_current_working_dir();
+    assert_non_null(cwd);
+
+    /* Create a base disposable directory */
+    tmp_dir = torture_make_temp_dir(template);
+    assert_non_null(tmp_dir);
+
+    /* Create a single directory */
+    count = snprintf(buffer, sizeof(buffer), "%s/a", tmp_dir);
+    assert_return_code(count, errno);
+
+    rc = ssh_mkdirs(buffer, 0700);
+    assert_return_code(rc, errno);
+
+    rc = ssh_dir_writeable(buffer);
+    assert_int_equal(rc, 1);
+
+    /* Create directories recursively */
+    count = snprintf(buffer, sizeof(buffer), "%s/b/c/d", tmp_dir);
+    assert_return_code(count, errno);
+
+    rc = ssh_mkdirs(buffer, 0700);
+    assert_return_code(rc, errno);
+
+    rc = ssh_dir_writeable(buffer);
+    assert_int_equal(rc, 1);
+
+    /* Change directory */
+    rc = torture_change_dir(tmp_dir);
+    assert_return_code(rc, errno);
+
+    /* Create single local directory */
+    rc = ssh_mkdirs("e", 0700);
+    assert_return_code(rc, errno);
+
+    rc = ssh_dir_writeable("e");
+    assert_int_equal(rc, 1);
+
+    /* Create local directories recursively */
+    rc = ssh_mkdirs("f/g/h", 0700);
+    assert_return_code(rc, errno);
+
+    rc = ssh_dir_writeable("f/g/h");
+    assert_int_equal(rc, 1);
+
+    /* Negative test for creating "." directory */
+    rc = ssh_mkdirs(".", 0700);
+    assert_int_equal(rc, -1);
+    assert_int_equal(errno, EINVAL);
+
+    /* Negative test for creating "/" directory */
+    rc = ssh_mkdirs("/", 0700);
+    assert_int_equal(rc, -1);
+    assert_int_equal(errno, EINVAL);
+
+    /* Negative test for creating "" directory */
+    rc = ssh_mkdirs("", 0700);
+    assert_int_equal(rc, -1);
+    assert_int_equal(errno, EINVAL);
+
+    /* Negative test for creating NULL directory */
+    rc = ssh_mkdirs(NULL, 0700);
+    assert_int_equal(rc, -1);
+    assert_int_equal(errno, EINVAL);
+
+    /* Negative test for creating existing directory */
+    rc = ssh_mkdirs("a", 0700);
+    assert_int_equal(rc, -1);
+    assert_int_equal(errno, EEXIST);
+
+    /* Return to original directory */
+    rc = torture_change_dir(cwd);
+    assert_return_code(rc, errno);
+
+    /* Cleanup */
+    torture_rmdirs(tmp_dir);
+
+    SAFE_FREE(tmp_dir);
+    SAFE_FREE(cwd);
+}
+
+static void torture_ssh_quote_file_name(UNUSED_PARAM(void **state))
+{
+    char buffer[2048];
+    int rc;
+
+    /* Only ordinary chars */
+    rc = ssh_quote_file_name("a b", buffer, 2048);
+    assert_int_equal(rc, 5);
+    assert_string_equal(buffer, "'a b'");
+
+    /* Single quote in file name */
+    rc = ssh_quote_file_name("a'b", buffer, 2048);
+    assert_int_equal(rc, 9);
+    assert_string_equal(buffer, "'a'\"'\"'b'");
+
+    /* Exclamation in file name */
+    rc = ssh_quote_file_name("a!b", buffer, 2048);
+    assert_int_equal(rc, 8);
+    assert_string_equal(buffer, "'a'\\!'b'");
+
+    /* All together */
+    rc = ssh_quote_file_name("'a!b'", buffer, 2048);
+    assert_int_equal(rc, 14);
+    assert_string_equal(buffer, "\"'\"'a'\\!'b'\"'\"");
+
+    rc = ssh_quote_file_name("a'!b", buffer, 2048);
+    assert_int_equal(rc, 11);
+    assert_string_equal(buffer, "'a'\"'\"\\!'b'");
+
+    rc = ssh_quote_file_name("a'$b", buffer, 2048);
+    assert_int_equal(rc, 10);
+    assert_string_equal(buffer, "'a'\"'\"'$b'");
+
+    rc = ssh_quote_file_name("a'`b", buffer, 2048);
+    assert_int_equal(rc, 10);
+    assert_string_equal(buffer, "'a'\"'\"'`b'");
+
+
+    rc = ssh_quote_file_name(" ", buffer, 2048);
+    assert_int_equal(rc, 3);
+    assert_string_equal(buffer, "' '");
+
+    rc = ssh_quote_file_name("  ", buffer, 2048);
+    assert_int_equal(rc, 4);
+    assert_string_equal(buffer, "'  '");
+
+
+    rc = ssh_quote_file_name("\r", buffer, 2048);
+    assert_int_equal(rc, 3);
+    assert_string_equal(buffer, "'\r'");
+
+    rc = ssh_quote_file_name("\n", buffer, 2048);
+    assert_int_equal(rc, 3);
+    assert_string_equal(buffer, "'\n'");
+
+    rc = ssh_quote_file_name("\r\n", buffer, 2048);
+    assert_int_equal(rc, 4);
+    assert_string_equal(buffer, "'\r\n'");
+
+
+    rc = ssh_quote_file_name("\\r", buffer, 2048);
+    assert_int_equal(rc, 4);
+    assert_string_equal(buffer, "'\\r'");
+
+    rc = ssh_quote_file_name("\\n", buffer, 2048);
+    assert_int_equal(rc, 4);
+    assert_string_equal(buffer, "'\\n'");
+
+    rc = ssh_quote_file_name("\\r\\n", buffer, 2048);
+    assert_int_equal(rc, 6);
+    assert_string_equal(buffer, "'\\r\\n'");
+
+
+    rc = ssh_quote_file_name("\t", buffer, 2048);
+    assert_int_equal(rc, 3);
+    assert_string_equal(buffer, "'\t'");
+
+    rc = ssh_quote_file_name("\v", buffer, 2048);
+    assert_int_equal(rc, 3);
+    assert_string_equal(buffer, "'\v'");
+
+    rc = ssh_quote_file_name("\t\v", buffer, 2048);
+    assert_int_equal(rc, 4);
+    assert_string_equal(buffer, "'\t\v'");
+
+
+    rc = ssh_quote_file_name("'", buffer, 2048);
+    assert_int_equal(rc, 3);
+    assert_string_equal(buffer, "\"'\"");
+
+    rc = ssh_quote_file_name("''", buffer, 2048);
+    assert_int_equal(rc, 4);
+    assert_string_equal(buffer, "\"''\"");
+
+
+    rc = ssh_quote_file_name("\"", buffer, 2048);
+    assert_int_equal(rc, 3);
+    assert_string_equal(buffer, "'\"'");
+
+    rc = ssh_quote_file_name("\"\"", buffer, 2048);
+    assert_int_equal(rc, 4);
+    assert_string_equal(buffer, "'\"\"'");
+
+    rc = ssh_quote_file_name("'\"", buffer, 2048);
+    assert_int_equal(rc, 6);
+    assert_string_equal(buffer, "\"'\"'\"'");
+
+    rc = ssh_quote_file_name("\"'", buffer, 2048);
+    assert_int_equal(rc, 6);
+    assert_string_equal(buffer, "'\"'\"'\"");
+
+
+    /* Worst case */
+    rc = ssh_quote_file_name("a'b'", buffer, 3 * 4 + 1);
+    assert_int_equal(rc, 12);
+    assert_string_equal(buffer, "'a'\"'\"'b'\"'\"");
+
+    /* Negative tests */
+
+    /* NULL params */
+    rc = ssh_quote_file_name(NULL, buffer, 3 * 4 + 1);
+    assert_int_equal(rc, SSH_ERROR);
+
+    /* NULL params */
+    rc = ssh_quote_file_name("a b", NULL, 3 * 4 + 1);
+    assert_int_equal(rc, SSH_ERROR);
+
+    /* Small buffer size */
+    rc = ssh_quote_file_name("a b", buffer, 0);
+    assert_int_equal(rc, SSH_ERROR);
+
+    /* Worst case and small buffer size */
+    rc = ssh_quote_file_name("a'b'", buffer, 3 * 4);
+    assert_int_equal(rc, SSH_ERROR);
+}
+
+static void torture_ssh_newline_vis(UNUSED_PARAM(void **state))
+{
+    int rc;
+    char buffer[1024];
+
+    rc = ssh_newline_vis("\n", buffer, 1024);
+    assert_int_equal(rc, 2);
+    assert_string_equal(buffer, "\\n");
+
+    rc = ssh_newline_vis("\n\n\n\n", buffer, 1024);
+    assert_int_equal(rc, 8);
+    assert_string_equal(buffer, "\\n\\n\\n\\n");
+
+    rc = ssh_newline_vis("a\nb\n", buffer, 1024);
+    assert_int_equal(rc, 6);
+    assert_string_equal(buffer, "a\\nb\\n");
+}
+
 int torture_run_tests(void) {
     int rc;
     struct CMUnitTest tests[] = {
@@ -365,9 +669,14 @@ int torture_run_tests(void) {
 #endif
         cmocka_unit_test_setup_teardown(torture_path_expand_escape, setup, teardown),
         cmocka_unit_test_setup_teardown(torture_path_expand_known_hosts, setup, teardown),
+        cmocka_unit_test_setup_teardown(torture_path_expand_percent, setup, teardown),
         cmocka_unit_test(torture_timeout_elapsed),
         cmocka_unit_test(torture_timeout_update),
         cmocka_unit_test(torture_ssh_analyze_banner),
+        cmocka_unit_test(torture_ssh_dir_writeable),
+        cmocka_unit_test(torture_ssh_newline_vis),
+        cmocka_unit_test(torture_ssh_mkdirs),
+        cmocka_unit_test(torture_ssh_quote_file_name),
     };
 
     ssh_init();

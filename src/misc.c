@@ -130,6 +130,31 @@ int ssh_file_readaccess_ok(const char *file) {
   return 1;
 }
 
+/**
+ * @brief Check if the given path is an existing directory and that is
+ * accessible for writing.
+ *
+ * @param[in] path Path to the directory to be checked
+ *
+ * @return Return 1 if the directory exists and is accessible; 0 otherwise
+ * */
+int ssh_dir_writeable(const char *path)
+{
+    struct _stat buffer;
+    int rc;
+
+    rc = _stat(path, &buffer);
+    if (rc < 0) {
+        return 0;
+    }
+
+    if ((buffer.st_mode & _S_IFDIR) && (buffer.st_mode & _S_IWRITE)) {
+        return 1;
+    }
+
+    return 0;
+}
+
 #define SSH_USEC_IN_SEC         1000000LL
 #define SSH_SECONDS_SINCE_1601  11644473600LL
 
@@ -245,6 +270,31 @@ int ssh_file_readaccess_ok(const char *file)
     }
 
     return 1;
+}
+
+/**
+ * @brief Check if the given path is an existing directory and that is
+ * accessible for writing.
+ *
+ * @param[in] path Path to the directory to be checked
+ *
+ * @return Return 1 if the directory exists and is accessible; 0 otherwise
+ * */
+int ssh_dir_writeable(const char *path)
+{
+    struct stat buffer;
+    int rc;
+
+    rc = stat(path, &buffer);
+    if (rc < 0) {
+        return 0;
+    }
+
+    if (S_ISDIR(buffer.st_mode) && (buffer.st_mode & S_IWRITE)) {
+        return 1;
+    }
+
+    return 0;
 }
 
 char *ssh_get_local_username(void)
@@ -387,6 +437,193 @@ void ssh_print_hexa(const char *descr, const unsigned char *what, size_t len) {
     fprintf(stderr, "%s: %s\n", descr, hexa);
 
     free(hexa);
+}
+
+/**
+ * @brief Log the content of a buffer in hexadecimal format, similar to the
+ * output of 'hexdump -C' command.
+ *
+ * The first logged line is the given description followed by the length.
+ * Then the content of the buffer is logged 16 bytes per line in the following
+ * format:
+ *
+ * (offset) (first 8 bytes) (last 8 bytes) (the 16 bytes as ASCII char values)
+ *
+ * The output for a 16 bytes array containing values from 0x00 to 0x0f would be:
+ *
+ * "Example (16 bytes):"
+ * "  00000000  00 01 02 03 04 05 06 07  08 09 0a 0b 0c 0d 0e 0f  ................"
+ *
+ * The value for each byte as corresponding ASCII character is printed at the
+ * end if the value is printable. Otherwise it is replace with '.'.
+ *
+ * @param[in] descr A description for the content to be logged
+ * @param[in] what  The buffer to be logged
+ * @param[in] len   The length of the buffer given in what
+ *
+ * @note If a too long description is provided (which would result in a first
+ * line longer than 80 bytes), the function will fail.
+ */
+void ssh_log_hexdump(const char *descr, const unsigned char *what, size_t len)
+{
+    size_t i;
+    char ascii[17];
+    const unsigned char *pc = NULL;
+    size_t count = 0;
+    ssize_t printed = 0;
+
+    /* The required buffer size is calculated from:
+     *
+     *  2 bytes for spaces at the beginning
+     *  8 bytes for the offset
+     *  2 bytes for spaces
+     * 24 bytes to print the first 8 bytes + spaces
+     *  1 byte for an extra space
+     * 24 bytes to print next 8 bytes + spaces
+     *  2 bytes for extra spaces
+     * 16 bytes for the content as ASCII characters at the end
+     *  1 byte for the ending '\0'
+     *
+     * Resulting in 80 bytes.
+     *
+     * Except for the first line (description + size), all lines have fixed
+     * length. If a too long description is used, the function will fail.
+     * */
+    char buffer[80];
+
+    /* Print description */
+    if (descr != NULL) {
+        printed = snprintf(buffer, sizeof(buffer), "%s ", descr);
+        if (printed < 0) {
+            goto error;
+        }
+        count += printed;
+    } else {
+        printed = snprintf(buffer, sizeof(buffer), "(NULL description) ");
+        if (printed < 0) {
+            goto error;
+        }
+        count += printed;
+    }
+
+    if (len == 0) {
+        printed = snprintf(buffer + count, sizeof(buffer) - count,
+                           "(zero length):");
+        if (printed < 0) {
+            goto error;
+        }
+        SSH_LOG(SSH_LOG_DEBUG, "%s", buffer);
+        return;
+    } else {
+        printed = snprintf(buffer + count, sizeof(buffer) - count,
+                           "(%zu bytes):", len);
+        if (printed < 0) {
+            goto error;
+        }
+        count += printed;
+    }
+
+    if (what == NULL) {
+        printed = snprintf(buffer + count, sizeof(buffer) - count,
+                           "(NULL)");
+        if (printed < 0) {
+            goto error;
+        }
+        SSH_LOG(SSH_LOG_DEBUG, "%s", buffer);
+        return;
+    }
+
+    SSH_LOG(SSH_LOG_DEBUG, "%s", buffer);
+
+    /* Reset state */
+    count = 0;
+    pc = what;
+
+    for (i = 0; i < len; i++) {
+        /* Add one space after printing 8 bytes */
+        if ((i % 8) == 0) {
+            if (i != 0) {
+                printed = snprintf(buffer + count, sizeof(buffer) - count, " ");
+                if (printed < 0) {
+                    goto error;
+                }
+                count += printed;
+            }
+        }
+
+        /* Log previous line and reset state for new line */
+        if ((i % 16) == 0) {
+            if (i != 0) {
+                printed = snprintf(buffer + count, sizeof(buffer) - count,
+                                   "  %s", ascii);
+                if (printed < 0) {
+                    goto error;
+                }
+                SSH_LOG(SSH_LOG_DEBUG, "%s", buffer);
+                count = 0;
+            }
+
+            /* Start a new line with the offset */
+            printed = snprintf(buffer, sizeof(buffer),
+                               "  %08zx ", i);
+            if (printed < 0) {
+                goto error;
+            }
+            count += printed;
+        }
+
+        /* Print the current byte hexadecimal representation */
+        printed = snprintf(buffer + count, sizeof(buffer) - count,
+                           " %02x", pc[i]);
+        if (printed < 0) {
+            goto error;
+        }
+        count += printed;
+
+        /* If printable, store the ASCII character */
+        if (isprint(pc[i])) {
+            ascii[i % 16] = pc[i];
+        } else {
+            ascii[i % 16] = '.';
+        }
+        ascii[(i % 16) + 1] = '\0';
+    }
+
+    /* Add padding if not exactly 16 characters */
+    while ((i % 16) != 0) {
+        /* Add one space after printing 8 bytes */
+        if ((i % 8) == 0) {
+            if (i != 0) {
+                printed = snprintf(buffer + count, sizeof(buffer) - count, " ");
+                if (printed < 0) {
+                    goto error;
+                }
+                count += printed;
+            }
+        }
+
+        printed = snprintf(buffer + count, sizeof(buffer) - count, "   ");
+        if (printed < 0) {
+            goto error;
+        }
+        count += printed;
+        i++;
+    }
+
+    /* Print the last printable part */
+    printed = snprintf(buffer + count, sizeof(buffer) - count,
+                       "   %s", ascii);
+    if (printed < 0) {
+        goto error;
+    }
+
+    SSH_LOG(SSH_LOG_DEBUG, "%s", buffer);
+
+    return;
+
+error:
+    SSH_LOG(SSH_LOG_WARN, "Could not print to buffer");
+    return;
 }
 
 /**
@@ -713,16 +950,81 @@ char *ssh_basename (const char *path) {
  *
  * @return              0 on success, < 0 on error with errno set.
  */
-int ssh_mkdir(const char *pathname, mode_t mode) {
-  int r;
-
+int ssh_mkdir(const char *pathname, mode_t mode)
+{
+    int r;
 #ifdef _WIN32
-  r = _mkdir(pathname);
+    r = _mkdir(pathname);
 #else
-  r = mkdir(pathname, mode);
+    r = mkdir(pathname, mode);
 #endif
 
-  return r;
+    return r;
+}
+
+/**
+ * @brief Attempts to create a directory with the given pathname. The missing
+ * directories in the given pathname are created recursively.
+ *
+ * @param[in]  pathname The path name to create the directory.
+ *
+ * @param[in]  mode     The permissions to use.
+ *
+ * @return              0 on success, < 0 on error with errno set.
+ *
+ * @note mode is ignored on Windows systems.
+ */
+int ssh_mkdirs(const char *pathname, mode_t mode)
+{
+    int rc = 0;
+    char *parent = NULL;
+
+    if (pathname == NULL ||
+        pathname[0] == '\0' ||
+        !strcmp(pathname, "/") ||
+        !strcmp(pathname, "."))
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    errno = 0;
+
+#ifdef _WIN32
+    rc = _mkdir(pathname);
+#else
+    rc = mkdir(pathname, mode);
+#endif
+
+    if (rc < 0) {
+        /* If a directory was missing, try to create the parent */
+        if (errno == ENOENT) {
+            parent = ssh_dirname(pathname);
+            if (parent == NULL) {
+                errno = ENOMEM;
+                return -1;
+            }
+
+            rc = ssh_mkdirs(parent, mode);
+            if (rc < 0) {
+                /* We could not create the parent */
+                SAFE_FREE(parent);
+                return -1;
+            }
+
+            SAFE_FREE(parent);
+
+            /* Try again */
+            errno = 0;
+#ifdef _WIN32
+            rc = _mkdir(pathname);
+#else
+            rc = mkdir(pathname, mode);
+#endif
+        }
+    }
+
+    return rc;
 }
 
 /**
@@ -825,6 +1127,7 @@ char *ssh_path_expand_escape(ssh_session session, const char *s) {
 
     for (i = 0; *p != '\0'; p++) {
         if (*p != '%') {
+        escape:
             buf[i] = *p;
             i++;
             if (i >= MAX_BUF_SIZE) {
@@ -841,6 +1144,8 @@ char *ssh_path_expand_escape(ssh_session session, const char *s) {
         }
 
         switch (*p) {
+            case '%':
+                goto escape;
             case 'd':
                 x = strdup(session->opts.sshdir);
                 break;
@@ -1201,6 +1506,233 @@ uint64_inc(unsigned char *counter)
         if (counter[i])
           return;
     }
+}
+
+/**
+ * @internal
+ *
+ * @brief Quote file name to be used on shell.
+ *
+ * Try to put the given file name between single quotes. There are special
+ * cases:
+ *
+ * - When the '\'' char is found in the file name, it is double quoted
+ *   - example:
+ *     input: a'b
+ *     output: 'a'"'"'b'
+ * - When the '!' char is found in the file name, it is replaced by an unquoted
+ *   verbatim char "\!"
+ *   - example:
+ *     input: a!b
+ *     output 'a'\!'b'
+ *
+ * @param[in]   file_name  File name string to be quoted before used on shell
+ * @param[out]  buf       Buffer to receive the final quoted file name.  Must
+ *                        have room for the final quoted string.  The maximum
+ *                        output length would be (3 * strlen(file_name) + 1)
+ *                        since in the worst case each character would be
+ *                        replaced by 3 characters, plus the terminating '\0'.
+ * @param[in]   buf_len   The size of the provided output buffer
+ *
+ * @returns SSH_ERROR on error; length of the resulting string not counting the
+ * string terminator '\0'
+ * */
+int ssh_quote_file_name(const char *file_name, char *buf, size_t buf_len)
+{
+    const char *src = NULL;
+    char *dst = NULL;
+    size_t required_buf_len;
+
+    enum ssh_quote_state_e state = NO_QUOTE;
+
+    if (file_name == NULL || buf == NULL || buf_len == 0) {
+        SSH_LOG(SSH_LOG_WARNING, "Invalid parameter");
+        return SSH_ERROR;
+    }
+
+    /* Only allow file names smaller than 32kb. */
+    if (strlen(file_name) > 32 * 1024) {
+        SSH_LOG(SSH_LOG_WARNING, "File name too long");
+        return SSH_ERROR;
+    }
+
+    /* Paranoia check */
+    required_buf_len = (size_t)3 * strlen(file_name) + 1;
+    if (required_buf_len > buf_len) {
+        SSH_LOG(SSH_LOG_WARNING, "Buffer too small");
+        return SSH_ERROR;
+    }
+
+    src = file_name;
+    dst = buf;
+
+    while ((*src != '\0')) {
+        switch (*src) {
+
+        /* The '\'' char is double quoted */
+
+        case '\'':
+            switch (state) {
+            case NO_QUOTE:
+                /* Start a new double quoted string. The '\'' char will be
+                 * copied to the beginning of it at the end of the loop. */
+                *dst++ = '"';
+                break;
+            case SINGLE_QUOTE:
+                /* Close the current single quoted string and start a new double
+                 * quoted string. The '\'' char will be copied to the beginning
+                 * of it at the end of the loop. */
+                *dst++ = '\'';
+                *dst++ = '"';
+                break;
+            case DOUBLE_QUOTE:
+                /* If already in the double quoted string, keep copying the
+                 * sequence of chars. */
+                break;
+            default:
+                /* Should never be reached */
+                goto error;
+            }
+
+            /* When the '\'' char is found, the resulting state will be
+             * DOUBLE_QUOTE in any case*/
+            state = DOUBLE_QUOTE;
+            break;
+
+        /* The '!' char is replaced by unquoted "\!" */
+
+        case '!':
+            switch (state) {
+            case NO_QUOTE:
+                /* The '!' char is interpreted in some shells (e.g. CSH) even
+                 * when is quoted with single quotes.  Replace it with unquoted
+                 * "\!" which is correctly interpreted as the '!' character. */
+                *dst++ = '\\';
+                break;
+            case SINGLE_QUOTE:
+                /* Close the current quoted string and replace '!' for unquoted
+                 * "\!" */
+                *dst++ = '\'';
+                *dst++ = '\\';
+                break;
+            case DOUBLE_QUOTE:
+                /* Close current quoted string and replace  "!" for unquoted
+                 * "\!" */
+                *dst++ = '"';
+                *dst++ = '\\';
+                break;
+            default:
+                /* Should never be reached */
+                goto error;
+            }
+
+            /* When the '!' char is found, the resulting state will be NO_QUOTE
+             * in any case*/
+            state = NO_QUOTE;
+            break;
+
+        /* Ordinary chars are single quoted */
+
+        default:
+            switch (state) {
+            case NO_QUOTE:
+                /* Start a new single quoted string */
+                *dst++ = '\'';
+                break;
+            case SINGLE_QUOTE:
+                /* If already in the single quoted string, keep copying the
+                 * sequence of chars. */
+                break;
+            case DOUBLE_QUOTE:
+                /* Close current double quoted string and start a new single
+                 * quoted string. */
+                *dst++ = '"';
+                *dst++ = '\'';
+                break;
+            default:
+                /* Should never be reached */
+                goto error;
+            }
+
+            /* When an ordinary char is found, the resulting state will be
+             * SINGLE_QUOTE in any case*/
+            state = SINGLE_QUOTE;
+            break;
+        }
+
+        /* Copy the current char to output */
+        *dst++ = *src++;
+    }
+
+    /* Close the quoted string when necessary */
+
+    switch (state) {
+    case NO_QUOTE:
+        /* No open string */
+        break;
+    case SINGLE_QUOTE:
+        /* Close current single quoted string */
+        *dst++ = '\'';
+        break;
+    case DOUBLE_QUOTE:
+        /* Close current double quoted string */
+        *dst++ = '"';
+        break;
+    default:
+        /* Should never be reached */
+        goto error;
+    }
+
+    /* Put the string terminator */
+    *dst = '\0';
+
+    return dst - buf;
+
+error:
+    return SSH_ERROR;
+}
+
+/**
+ * @internal
+ *
+ * @brief Given a string, encode existing newlines as the string "\\n"
+ *
+ * @param[in]  string   Input string
+ * @param[out] buf      Output buffer. This buffer must be at least (2 *
+ *                      strlen(string)) + 1 long.  In the worst case,
+ *                      each character can be encoded as 2 characters plus the
+ *                      terminating '\0'.
+ * @param[in]  buf_len  Size of the provided output buffer
+ *
+ * @returns SSH_ERROR on error; length of the resulting string not counting the
+ * terminating '\0' otherwise
+ */
+int ssh_newline_vis(const char *string, char *buf, size_t buf_len)
+{
+    const char *in = NULL;
+    char *out = NULL;
+
+    if (string == NULL || buf == NULL || buf_len == 0) {
+        return SSH_ERROR;
+    }
+
+    if ((2 * strlen(string) + 1) > buf_len) {
+        SSH_LOG(SSH_LOG_WARNING, "Buffer too small");
+        return SSH_ERROR;
+    }
+
+    out = buf;
+    for (in = string; *in != '\0'; in++) {
+        if (*in == '\n') {
+            *out++ = '\\';
+            *out++ = 'n';
+        } else {
+            *out++ = *in;
+        }
+    }
+    *out = '\0';
+
+    return out - buf;
 }
 
 /** @} */
