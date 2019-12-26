@@ -1201,7 +1201,7 @@ int ssh_socket_set_blocking(socket_t fd) {
  * which is problematic for hosts having DNS fail-over.
  */
 
-int ssh_socket_connect(ssh_socket s, const char *host, int port, const char *bind_addr){
+int ssh_socket_connect(ssh_socket s, const char *host, uint16_t port, const char *bind_addr){
 	socket_t fd;
 
 	if(s->state != SSH_SOCKET_NONE) {
