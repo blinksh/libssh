@@ -195,6 +195,23 @@ sftp_session sftp_new_channel(ssh_session session, ssh_channel channel){
     return NULL;
   }
 
+  sftp->read_packet = calloc(1, sizeof(struct sftp_packet_struct));
+  if (sftp->read_packet == NULL) {
+    ssh_set_error_oom(session);
+    SAFE_FREE(sftp);
+
+    return NULL;
+  }
+
+  sftp->read_packet->payload = ssh_buffer_new();
+  if (sftp->read_packet->payload == NULL) {
+    ssh_set_error_oom(session);
+    SAFE_FREE(sftp);
+
+    return NULL;
+  }
+
+
   sftp->session = session;
   sftp->channel = channel;
 
