@@ -377,9 +377,12 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
     uint8_t buffer[4096] = {0};
 
     for (;;) {
+        if (_inputStream.hasBytesAvailable == NO) {
+            break;
+        }
         NSInteger len = [_inputStream read:buffer maxLength:BUFFER_SIZE];
         if (len <= 0) {
-            // TODO: handle -1?
+            // With -1 (ie timeout), it will go down and be captured later.
             break;
         }
 
@@ -421,6 +424,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
         }
         break;
     }
+    
     [_in_data replaceBytesInRange:NSMakeRange(0, consumed) withBytes:NULL length:0];
 }
 
