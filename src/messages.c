@@ -353,6 +353,20 @@ static int ssh_execute_client_request(ssh_session session, ssh_message msg)
         }
 
         return SSH_OK;
+    } else if (msg->type == SSH_REQUEST_CHANNEL_OPEN
+               && msg->channel_request_open.type == SSH_CHANNEL_FORWARDED_TCPIP
+               && ssh_callbacks_exists(session->common.callbacks, channel_open_request_forward_function)) {
+      channel = session->common.callbacks->channel_open_request_forward_function (session, msg->channel_request_open.destination_port, session->common.callbacks->userdata);
+      if (channel != NULL) {
+        rc = ssh_message_channel_request_open_reply_accept_channel(msg, channel);
+
+        return rc;
+
+      } else {
+        ssh_message_reply_default(msg);
+      }
+
+      return SSH_OK;
     }
 
     return rc;
