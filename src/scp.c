@@ -230,6 +230,44 @@ int ssh_scp_init(ssh_scp scp)
 }
 
 /**
+ * @brief Initiate a provided channel by reading the first status codes.
+ *
+ * @param[in]  scp      The scp context.
+ * @param[in]  channel  The channel where to read it and associate to scp.
+ *
+ * @return SSH_OK on success or an SSH error code.
+ *
+ * @see ssh_scp_init()
+ */
+int ssh_scp_init_channel(ssh_scp scp, ssh_channel channel) {
+    int rc;
+
+    scp->channel = channel;
+
+    if (scp->mode == SSH_SCP_WRITE) {
+        rc = ssh_scp_response(scp, NULL);
+        if (rc == SSH_AGAIN) {
+            return SSH_AGAIN;
+        } else if  (rc != 0) {
+            return  SSH_ERROR;
+        }
+    } else {
+        rc = ssh_channel_write(scp->channel, "", 1);
+        if (rc == SSH_AGAIN) {
+            return SSH_AGAIN;
+        }
+    }
+
+    if (scp->mode == SSH_SCP_WRITE) {
+        scp->state = SSH_SCP_WRITE_INITED;
+    } else {
+        scp->state = SSH_SCP_READ_INITED;
+    }
+
+    return SSH_OK;
+}
+
+/**
  * @brief Close the scp channel.
  *
  * @param[in]  scp      The scp context to close.

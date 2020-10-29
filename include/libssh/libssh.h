@@ -737,6 +737,7 @@ LIBSSH_API int ssh_scp_close(ssh_scp scp);
 LIBSSH_API int ssh_scp_deny_request(ssh_scp scp, const char *reason);
 LIBSSH_API void ssh_scp_free(ssh_scp scp);
 LIBSSH_API int ssh_scp_init(ssh_scp scp);
+LIBSSH_API int ssh_scp_init_channel(ssh_scp scp, ssh_channel channel);
 LIBSSH_API int ssh_scp_leave_directory(ssh_scp scp);
 LIBSSH_API ssh_scp ssh_scp_new(ssh_session session, int mode, const char *location);
 LIBSSH_API int ssh_scp_pull_request(ssh_scp scp);
