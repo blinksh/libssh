@@ -500,6 +500,7 @@ int ssh_scp_push_file64(ssh_scp scp, const char *filename, uint64_t size,
     char *perms = NULL;
     char *vis_encoded = NULL;
     size_t vis_encoded_len;
+    uint8_t code;
 
     if (scp == NULL) {
         return SSH_ERROR;
@@ -563,10 +564,23 @@ int ssh_scp_push_file64(ssh_scp scp, const char *filename, uint64_t size,
         return SSH_ERROR;
     }
 
-    scp->filelen = size;
-    scp->processed = 0;
-    scp->state = SSH_SCP_WRITE_WRITING;
 
+    if (size == 0) {
+      /* When pushing an empty file, do not change the state  */
+      code = 0;
+      rc = ssh_channel_write(scp->channel, &code, 1);
+      if (rc == SSH_ERROR) {
+        scp->state = SSH_SCP_ERROR;
+        return SSH_ERROR;
+      }
+
+      scp->processed = scp->filelen = 0;
+      scp->state = SSH_SCP_WRITE_INITED;
+    } else {
+        scp->filelen = size;
+        scp->processed = 0;
+        scp->state = SSH_SCP_WRITE_WRITING;
+    }
     return SSH_OK;
 
 error:
@@ -1019,9 +1033,11 @@ int ssh_scp_read(ssh_scp scp, void *buffer, size_t size)
         size = (size_t) (scp->filelen - scp->processed);
     }
 
-    if (size > 65536) {
-        size = 65536; /* avoid too large reads */
-    }
+    /* Do not limit size as with async reads, the buffers will fill
+     and eventually the Source will stop sending data. */
+    /* if (size > 65536) { */
+    /*     size = 65536; /\* avoid too large reads *\/ */
+    /* } */
 
     rc = ssh_channel_read(scp->channel, buffer, size, 0);
     if (rc != SSH_ERROR) {
