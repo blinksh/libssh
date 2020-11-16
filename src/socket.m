@@ -377,6 +377,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
     uint8_t buffer[4096] = {0};
 
     for (;;) {
+        /* Avoid a read in case there are no bytes available, as that would block */
         if (_inputStream.hasBytesAvailable == NO) {
             break;
         }
