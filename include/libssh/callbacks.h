@@ -145,8 +145,21 @@ typedef ssh_channel (*ssh_channel_open_request_auth_agent_callback) (ssh_session
  * @returns NULL if the request should not be allowed
  * @warning The channel pointer returned by this callback must be closed by the application.
  */
-  typedef ssh_channel (*ssh_channel_open_request_forward_callback) (ssh_session session, uint16_t destination_port,
+typedef ssh_channel (*ssh_channel_open_request_forward_callback) (ssh_session session, uint16_t destination_port,
       void *userdata);
+
+/**
+ * @brief Handles a ProxyCommand execution request on the client side. This should be used
+ * when the client wants to be in control of how the command is executed, as some systems
+ * may not have support for the default implementation using forks. The command stdio must be
+ * connected to the given sockets.
+ * @param command Command to execute by the callback recipient.
+ * @param in Socket input
+ * @param out Socket output
+ * @param session current session handler
+ * @param userdata Userdata to be passed to the callback function
+*/
+typedef void (*ssh_session_set_proxycommand_callback) (const char *command, socket_t in, socket_t out, void *userdata);
 
 /**
  * The structure to replace libssh functions with appropriate callbacks.
@@ -171,6 +184,10 @@ struct ssh_callbacks_struct {
    * percentage of connection steps completed.
    */
   void (*connect_status_function)(void *userdata, float status);
+  /**
+   * This function will be called for a proxycommand execution.
+   */
+  ssh_session_set_proxycommand_callback set_proxycommand_function;
   /**
    * This function will be called each time a global request is received.
    */

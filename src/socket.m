@@ -1255,13 +1255,13 @@ void ssh_execute_command(const char *command, socket_t in, socket_t out){
  * This call will always be nonblocking.
  * @param s    socket to connect.
  * @param command Command to execute.
- * @returns SSH_OK socket is being connected.
+ * @returns SSH_OK socket is being connected.o
  * @returns SSH_ERROR error while executing the command.
  */
 
 __thread void (*thread_ssh_execute_command)(const char *command, socket_t in, socket_t out) = NULL;
 
-int ssh_socket_connect_proxycommand(ssh_socket s, const char *command){
+int ssh_socket_connect_proxycommand(ssh_session session, ssh_socket s, const char *command){
   socket_t pair[2];
   int pid;
   int rc;
@@ -1276,7 +1276,11 @@ int ssh_socket_connect_proxycommand(ssh_socket s, const char *command){
   }
 
   SSH_LOG(SSH_LOG_PROTOCOL,"Executing proxycommand '%s'",command);
-  if (thread_ssh_execute_command != NULL) {
+  if (ssh_callbacks_exists(session->common.callbacks, set_proxycommand_function)) {
+    session->common.callbacks->set_proxycommand_function(command, pair[0], pair[0],
+                                                         session->common.callbacks->userdata);
+  }
+  else if (thread_ssh_execute_command != NULL) {
       (*thread_ssh_execute_command)(command, pair[0],pair[0]);
   } else {
     pid = fork();

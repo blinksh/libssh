@@ -566,7 +566,7 @@ int ssh_connect(ssh_session session) {
     ret=SSH_OK;
 #ifndef _WIN32
   } else if (session->opts.ProxyCommand != NULL){
-    ret = ssh_socket_connect_proxycommand(session->socket,
+    ret = ssh_socket_connect_proxycommand(session, session->socket,
                                           session->opts.ProxyCommand);
 #endif
   } else {
