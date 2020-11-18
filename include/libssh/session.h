@@ -223,6 +223,7 @@ struct ssh_session_struct {
         char *wanted_methods[SSH_KEX_METHODS];
         char *pubkey_accepted_types;
         char *ProxyCommand;
+        char *ProxyJump;
         char *custombanner;
         unsigned long timeout; /* seconds */
         unsigned long timeout_usec;

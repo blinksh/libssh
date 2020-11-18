@@ -172,6 +172,14 @@ int ssh_options_copy(ssh_session src, ssh_session *dest)
         }
     }
 
+    if (src->opts.ProxyJump != NULL) {
+        new->opts.ProxyJump = strdup(src->opts.ProxyJump);
+        if (new->opts.ProxyJump == NULL) {
+            ssh_free(new);
+            return -1;
+        }
+    }
+
     if (src->opts.pubkey_accepted_types != NULL) {
         new->opts.pubkey_accepted_types = strdup(src->opts.pubkey_accepted_types);
         if (new->opts.pubkey_accepted_types == NULL) {
@@ -409,6 +417,10 @@ int ssh_options_set_algo(ssh_session session,
  *                Set the command to be executed in order to connect to
  *                server (const char *).
  *
+ *              - SSH_OPTIONS_PROXYJUMP:
+ *                Set the machines to use as jump hosts. The value is a coma
+ *                separated user@host:port sequence (const char *).
+ *
  *              - SSH_OPTIONS_GSSAPI_SERVER_IDENTITY
  *                Set it to specify the GSSAPI server identity that libssh
  *                should expect when connecting to the server (const char *).
@@ -478,6 +490,7 @@ int ssh_options_set(ssh_session session, enum ssh_options_e type,
     long int i;
     unsigned int u;
     int rc;
+    bool parse;
 
     if (session == NULL) {
         return -1;
@@ -923,6 +936,20 @@ int ssh_options_set(ssh_session session, enum ssh_options_e type,
                         return -1;
                     }
                     session->opts.ProxyCommand = q;
+                }
+            }
+            break;
+        case SSH_OPTIONS_PROXYJUMP:
+            v = value;
+            if (v == NULL || v[0] == -'\0') {
+                ssh_set_error_invalid(session);
+                return -1;
+            } else {
+                SAFE_FREE(session->opts.ProxyJump);
+                parse = (session->opts.ProxyCommand == NULL);
+                rc = ssh_config_parse_proxy_jump(session, v, parse); /*  /(session->opts.ProxyCommand == NULL));*/
+                if (rc != SSH_OK) {
+                    return -1;
                 }
             }
             break;

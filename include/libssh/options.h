@@ -22,6 +22,9 @@
 #define _OPTIONS_H
 
 int ssh_config_parse_file(ssh_session session, const char *filename);
+int
+ssh_config_parse_proxy_jump(ssh_session session, const char *s, bool do_parsing);
+
 int ssh_options_set_algo(ssh_session session,
                          enum ssh_kex_types_e algo,
                          const char *list);

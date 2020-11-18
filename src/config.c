@@ -290,7 +290,7 @@ ssh_config_match(char *value, const char *pattern, bool negate)
 /* @brief: Parse the ProxyJump configuration line and if parsing,
  * stores the result in the configuration option
  */
-static int
+int
 ssh_config_parse_proxy_jump(ssh_session session, const char *s, bool do_parsing)
 {
     char *c = NULL, *cp = NULL, *endp = NULL;
