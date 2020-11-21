@@ -246,6 +246,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
   if (stream == _inputStream) {
       switch (eventCode) {
           case NSStreamEventErrorOccurred:
+              [self streamError: stream];
               // Exception for incoming messages.
               if (s->callbacks && s->callbacks->exception) {
                 s->callbacks->exception(SSH_SOCKET_EXCEPTION_ERROR,
@@ -300,6 +301,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
       [self _writeout];
       return;
     case NSStreamEventErrorOccurred:
+        [self streamError: stream];
         if (s->callbacks && s->callbacks->exception) {
             s->callbacks->exception(SSH_SOCKET_EXCEPTION_ERROR,
                                     s->last_errno, s->callbacks->userdata);
@@ -309,6 +311,11 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
       NSLog(@"Blink: Unknown output event (%lu)", (unsigned long)eventCode);
       return;
   }
+}
+
+- (void)streamError:(NSStream *)stream {
+  NSError *error = [stream streamError];
+  _ssh_socket->last_errno = [error code];
 }
 
 - (int)wait:(int)milliseconds {
