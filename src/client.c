@@ -475,7 +475,9 @@ error:
     ssh_socket_close(session->socket);
     session->alive = 0;
     session->session_state=SSH_SESSION_STATE_ERROR;
-
+    if (session->common.callbacks && session->common.callbacks->session_exception_function) {
+      session->common.callbacks->session_exception_function(session, session->common.callbacks->userdata);
+    }
 }
 
 /** @internal

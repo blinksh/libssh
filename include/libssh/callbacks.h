@@ -162,6 +162,15 @@ typedef ssh_channel (*ssh_channel_open_request_forward_callback) (ssh_session se
 typedef void (*ssh_session_set_proxycommand_callback) (const char *command, socket_t in, socket_t out, void *userdata);
 
 /**
+ * @brief Handles Session exceptions that affect the whole connection. It is a way for fully
+ * asynchronous interfaces that do not poll for the status of the socket to also receive 
+ * changes to the connection on the socket.
+ * @param session current session handler
+ * @param userdata Userdata to be passed to the callback function
+*/
+typedef void (*ssh_session_exception_callback) (ssh_session session, void *userdata);
+
+/**
  * The structure to replace libssh functions with appropriate callbacks.
  */
 struct ssh_callbacks_struct {
@@ -201,6 +210,11 @@ struct ssh_callbacks_struct {
   /** This function will be called when an incoming "forward" request is received.
    */
   ssh_channel_open_request_forward_callback channel_open_request_forward_function;
+  /** This function will be called when there is an exception in the session
+   * connection. It serves as an extension on the client side for the
+   * client_connection_callback handling when there is an error.
+   * */
+  ssh_session_exception_callback session_exception_function;
 };
 typedef struct ssh_callbacks_struct *ssh_callbacks;
 
