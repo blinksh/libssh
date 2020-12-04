@@ -129,6 +129,7 @@ struct ssh_socket_struct {
 }
 
 - (void) close {
+  if (_outputStream != nil || _inputStream != nil) {
     [_outputStream close];
     [_inputStream close];
 
@@ -138,24 +139,29 @@ struct ssh_socket_struct {
     [_outputStream setDelegate: nil];
     [_inputStream setDelegate: nil];
 
+
+    CFRelease(_outputStream);
+    CFRelease(_inputStream);
+
     _outputStream = nil;
     _inputStream = nil;
+  }
 
-    if (_in_source_ref) {
-       CFRunLoopSourceInvalidate(_in_source_ref);
-       CFRelease(_in_source_ref);
-       _in_source_ref = NULL;
-     }
-    if (_in_sock_ref) {
+  if (_in_source_ref) {
+    CFRunLoopSourceInvalidate(_in_source_ref);
+    CFRelease(_in_source_ref);
+    _in_source_ref = NULL;
+  }
+  if (_in_sock_ref) {
 		CFSocketInvalidate(_in_sock_ref);
 		CFRelease(_in_sock_ref);
 		_in_sock_ref = NULL;
 	}
 
-    if (_out_fd != SSH_INVALID_SOCKET) {
-        close(_out_fd);
-        _out_fd = SSH_INVALID_SOCKET;
-    }
+  if (_out_fd != SSH_INVALID_SOCKET) {
+    close(_out_fd);
+    _out_fd = SSH_INVALID_SOCKET;
+  }
 }
 
 - (void)dealloc {
