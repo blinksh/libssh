@@ -173,32 +173,26 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
   ssh_socket s = io->_ssh_socket;
   switch (type) {
     case kCFSocketReadCallBack: {
-      const int BUFFER_SIZE = 4096;
-      uint8_t buffer[4096] = {0};
+      const int BUFFER_SIZE = 4096 * 8;
+      uint8_t buffer[BUFFER_SIZE] = {0};
 
-      for (;;) {
-        ssize_t len = read(CFSocketGetNative(sock), buffer, BUFFER_SIZE);
-        if (len == 0) { // EOF
-          if (io->_in_data.length > 0) {
-             [io _process_in_data];
-          }
-          // EOF
-          if (s->callbacks && s->callbacks->exception) {
-              s->callbacks->exception(SSH_SOCKET_EXCEPTION_EOF,
-                0, s->callbacks->userdata);
-          }
-          return;
-        } else if (len < 0) {
-          // try again
-          break;
+      ssize_t len = read(CFSocketGetNative(sock), buffer, BUFFER_SIZE);
+      if (len == 0) { // EOF
+        if (io->_in_data.length > 0) {
+          [io _process_in_data];
         }
-
-        [io->_in_data appendBytes:buffer length:len];
-
-        if (len < BUFFER_SIZE) {
-          break;
+        // EOF
+        if (s->callbacks && s->callbacks->exception) {
+          s->callbacks->exception(SSH_SOCKET_EXCEPTION_EOF,
+                                  0, s->callbacks->userdata);
         }
+        return;
+      } else if (len < 0) {
+        // try again
+        return;
       }
+
+      [io->_in_data appendBytes:buffer length:len];
 
       [io _process_in_data];
     }
@@ -386,29 +380,19 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
 }
 
 - (void)_readin {
-    const int BUFFER_SIZE = 4096;
-    uint8_t buffer[4096] = {0};
+    const int BUFFER_SIZE = 4096 * 8;
+    uint8_t buffer[BUFFER_SIZE] = {0};
 
-    for (;;) {
-        /* Avoid a read in case there are no bytes available, as that would block */
-        if (_inputStream.hasBytesAvailable == NO) {
-            break;
-        }
-        NSInteger len = [_inputStream read:buffer maxLength:BUFFER_SIZE];
-        if (len <= 0) {
-            // With -1 (ie timeout), it will go down and be captured later.
-            break;
-        }
-
-        [_in_data appendBytes:buffer length:len];
-
-        if (len < BUFFER_SIZE) {
-            break;
-        }
+    NSInteger len = [_inputStream read:buffer maxLength:BUFFER_SIZE];
+    if (len <= 0) {
+      // With -1 (ie timeout), it will go down and be captured later.
+      return;
     }
 
+    [_in_data appendBytes:buffer length:len];
+
     if (_in_data.length == 0) {
-        return;
+      return;
     }
 
     [self _process_in_data];
