@@ -2,6 +2,24 @@
 #define LIBCRYPTO_COMPAT_H
 
 #include <openssl/opensslv.h>
+
+// BLINK: need that to compile with openssl 1.1.1i
+#include <openssl/modes.h>
+
+#  define EVP_CIPHER_CTX_init(c)      EVP_CIPHER_CTX_reset(c)
+#  define EVP_CIPHER_CTX_cleanup(c)   EVP_CIPHER_CTX_reset(c)
+#  define SSLeay                  OpenSSL_version_num
+#  define SSLeay_version          OpenSSL_version
+#  define SSLEAY_VERSION_NUMBER   OPENSSL_VERSION_NUMBER
+#  define SSLEAY_VERSION          OPENSSL_VERSION
+#  define SSLEAY_CFLAGS           OPENSSL_CFLAGS
+#  define SSLEAY_BUILT_ON         OPENSSL_BUILT_ON
+#  define SSLEAY_PLATFORM         OPENSSL_PLATFORM
+#  define SSLEAY_DIR              OPENSSL_DIR
+#  define HAVE_OPENSSL_CRYPTO_CTR128_ENCRYPT 1
+
+// BLINKEND
+
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
 
 #include <openssl/rsa.h>
