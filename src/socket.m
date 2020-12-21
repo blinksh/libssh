@@ -1242,7 +1242,7 @@ void ssh_execute_command(const char *command, socket_t in, socket_t out){
   dup2(out,2);
   close(in);
   close(out);
-  execv(args[0],(char * const *)args);
+  /* BLINK execv(args[0],(char * const *)args); */
   exit(1);
 }
 
@@ -1280,7 +1280,7 @@ int ssh_socket_connect_proxycommand(ssh_session session, ssh_socket s, const cha
   else if (thread_ssh_execute_command != NULL) {
       (*thread_ssh_execute_command)(command, pair[0],pair[0]);
   } else {
-    pid = fork();
+    pid = 0; /* BLINK fork(); */
     if(pid == 0){
       ssh_execute_command(command,pair[0],pair[0]);
     }
