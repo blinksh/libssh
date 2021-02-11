@@ -666,6 +666,8 @@ typedef int (*ssh_auth_callback) (const char *prompt, char *buf, size_t len,
 
 /** @} */
 
+typedef int (*ssh_agent_callback) (void *data, uint32_t len, struct ssh_buffer_struct *reply, void *userdata);
+
 LIBSSH_API ssh_key ssh_key_new(void);
 #define SSH_KEY_FREE(x) \
     do { if ((x) != NULL) { ssh_key_free(x); x = NULL; } } while(0)
@@ -757,6 +759,7 @@ LIBSSH_API int ssh_select(ssh_channel *channels, ssh_channel *outchannels, socke
 LIBSSH_API int ssh_service_request(ssh_session session, const char *service);
 LIBSSH_API int ssh_set_agent_channel(ssh_session session, ssh_channel channel);
 LIBSSH_API int ssh_set_agent_socket(ssh_session session, socket_t fd);
+LIBSSH_API int ssh_set_agent_callback(ssh_session session, ssh_agent_callback cb, void *userdata);
 LIBSSH_API void ssh_set_blocking(ssh_session session, int blocking);
 LIBSSH_API void ssh_set_counters(ssh_session session, ssh_counter scounter,
                                  ssh_counter rcounter);

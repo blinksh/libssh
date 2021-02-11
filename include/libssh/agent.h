@@ -75,6 +75,8 @@ struct ssh_agent_struct {
   ssh_buffer ident;
   unsigned int count;
   ssh_channel channel;
+  ssh_agent_callback callback;
+  void *userdata;
 };
 
 #ifndef _WIN32
@@ -115,6 +117,7 @@ ssh_key ssh_agent_get_first_ident(struct ssh_session_struct *session,
 ssh_string ssh_agent_sign_data(ssh_session session,
                                const ssh_key pubkey,
                                struct ssh_buffer_struct *data);
+
 #endif
 
 #endif /* __AGENT_H */

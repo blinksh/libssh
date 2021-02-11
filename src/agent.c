@@ -185,6 +185,19 @@ int ssh_set_agent_socket(ssh_session session, socket_t fd){
   return SSH_OK;
 }
 
+int ssh_set_agent_callback(ssh_session session, ssh_agent_callback cb, void *userdata) {
+  if (!session || !cb)
+    return SSH_ERROR;
+  if (!session->agent){
+    ssh_set_error(session, SSH_REQUEST_DENIED, "Session has no active agent");
+    return SSH_ERROR;
+  }
+
+  session->agent->callback = cb;
+  session->agent->userdata = userdata;
+  return 0;
+}
+
 void ssh_agent_close(struct ssh_agent_struct *agent) {
   if (agent == NULL) {
     return;
@@ -256,6 +269,27 @@ static int agent_talk(struct ssh_session_struct *session,
   len = ssh_buffer_get_len(request);
   SSH_LOG(SSH_LOG_TRACE, "Request length: %u", len);
   PUSH_BE_U32(payload, 0, len);
+
+  if (session->agent->callback != NULL) {
+    /* Fill out reply with response. */
+    // TODO Send a buffer where to drop the data, as it can be longer than payload.
+    len = session->agent->callback(ssh_buffer_get(request),
+                                   len,
+                                   reply,
+                                   session->agent->userdata);
+    if (len <= 0) {
+      SSH_LOG(SSH_LOG_WARN, "Error calling agent");
+      return -1;
+    }
+
+    /* TODO We may be able to do sizeof(payload) instead of len, but we need a proper termination. */
+    /* Reply will be as a payload as well */
+//    if (ssh_buffer_add_data(reply, payload, len) < 0) {
+//      SSH_LOG(SSH_LOG_WARN, "Not enough space");
+//      return -1;
+//    }
+    return 0;
+  }
 
   /* send length and then the request packet */
   if (atomicio(session->agent, payload, 4, 0) == 4) {
@@ -459,7 +493,9 @@ int ssh_agent_is_running(ssh_session session) {
     return 0;
   }
 
-  if (ssh_socket_is_open(session->agent->sock)) {
+  if (session->agent->callback != NULL) {
+    return 1;
+  } else if (ssh_socket_is_open(session->agent->sock)) {
     return 1;
   } else {
     if (agent_connect(session) < 0) {
