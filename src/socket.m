@@ -320,10 +320,12 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
 
 - (int)wait:(int)milliseconds {
   NSDate * date;
-  if (milliseconds <= 0) {
-    date = [NSDate dateWithTimeIntervalSinceNow: 0.5];
-  } else {
+  if (milliseconds > 0) {
     date = [NSDate dateWithTimeIntervalSinceNow:milliseconds / 1000.0];
+  } else if (milliseconds == 0) {
+    return SSH_AGAIN;
+  } else {
+    date = [NSDate distantFuture];
   }
 
   BOOL res = [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:date];
