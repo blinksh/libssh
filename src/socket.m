@@ -87,7 +87,7 @@ struct ssh_socket_struct {
   ssh_session session;
   ssh_socket_callbacks callbacks;
 #ifdef HAVE_DISPATCH_H
-  void *io;
+  CFTypeRef io;
 #else
   int read_wontblock; /* reading now on socket will
                        not block */
@@ -111,6 +111,7 @@ struct ssh_socket_struct {
 
   NSInputStream *_inputStream;
   NSOutputStream *_outputStream;
+  NSRunLoop *_runLoop;
   ssh_socket _ssh_socket;
 
   CFSocketRef _in_sock_ref;
@@ -133,15 +134,11 @@ struct ssh_socket_struct {
     [_outputStream close];
     [_inputStream close];
 
-    [_inputStream removeFromRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
-    [_outputStream removeFromRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
+    [_inputStream  removeFromRunLoop:_runLoop forMode:NSDefaultRunLoopMode];
+    [_outputStream removeFromRunLoop:_runLoop forMode:NSDefaultRunLoopMode];
 
     [_outputStream setDelegate: nil];
     [_inputStream setDelegate: nil];
-
-
-    CFRelease(_outputStream);
-    CFRelease(_inputStream);
 
     _outputStream = nil;
     _inputStream = nil;
@@ -204,6 +201,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
 }
 
 - (int)connectedWithInFd:(int)fdIn fdOut:(int)fdOut {
+    _runLoop = [NSRunLoop currentRunLoop];
     CFSocketContext ctx = {.info = (__bridge void*)self};
     _in_sock_ref = CFSocketCreateWithNative(NULL, fdIn, kCFSocketReadCallBack, __in_sock_callback, &ctx);
 
@@ -215,7 +213,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
 }
 
 - (int)connectToHost:(NSString *)host andPort:(int)port {
-  NSRunLoop *runLoop = [NSRunLoop currentRunLoop];
+  _runLoop = [NSRunLoop currentRunLoop];
 
   CFReadStreamRef readStream;
   CFWriteStreamRef writeStream;
@@ -233,8 +231,8 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
 
   _ssh_socket->state = SSH_SOCKET_CONNECTING;
 
-  [_inputStream scheduleInRunLoop:runLoop forMode:NSDefaultRunLoopMode];
-  [_outputStream scheduleInRunLoop:runLoop forMode:NSDefaultRunLoopMode];
+  [_inputStream  scheduleInRunLoop:_runLoop forMode:NSDefaultRunLoopMode];
+  [_outputStream scheduleInRunLoop:_runLoop forMode:NSDefaultRunLoopMode];
 
   [_inputStream open];
   [_outputStream open];
@@ -328,7 +326,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
     date = [NSDate distantFuture];
   }
 
-  BOOL res = [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:date];
+  BOOL res = [_runLoop runMode:NSDefaultRunLoopMode beforeDate:date];
   if (res == NO) {
     return SSH_AGAIN;
   } else {
@@ -341,7 +339,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
       if (len == 0) {
           return len;
       }
-    [_outputStream scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
+    [_outputStream scheduleInRunLoop:_runLoop forMode:NSDefaultRunLoopMode];
   }
   if (len > 0) {
       [_out_data appendBytes:buffer length:len];
@@ -377,7 +375,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
 
   [_out_data replaceBytesInRange:NSMakeRange(0, written) withBytes:NULL length:0];
   if (_out_data.length == 0) {
-    [_outputStream removeFromRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
+    [_outputStream removeFromRunLoop:_runLoop forMode:NSDefaultRunLoopMode];
   }
 }
 
@@ -495,7 +493,7 @@ ssh_socket ssh_socket_new(ssh_session session) {
   s->data_except = 0;
   s->state=SSH_SOCKET_NONE;
 #if HAVE_DISPATCH_H
-  s->io = (__bridge_retained void*)[[IO alloc] initWithSSHSocket:s];
+  s->io = (__bridge_retained CFTypeRef)[[IO alloc] initWithSSHSocket:s];
 #else
   s->read_wontblock = 0;
   s->write_wontblock = 0;
@@ -531,8 +529,10 @@ void ssh_socket_reset(ssh_socket s){
   s->fd_is_socket = 1;
   s->data_except = 0;
 #if HAVE_DISPATCH_H
-  IO *io = (__bridge_transfer IO*)s->io;
-  s->io = (__bridge_retained void*)[[IO alloc] initWithSSHSocket:s];
+  if (s->io) {
+    CFRelease(s->io);
+  }
+  s->io = (__bridge_retained CFTypeRef)[[IO alloc] initWithSSHSocket:s];
 #else
   s->read_wontblock = 0;
   s->write_wontblock = 0;
@@ -757,8 +757,10 @@ void ssh_socket_free(ssh_socket s){
   }
   ssh_socket_close(s);
 #ifdef HAVE_DISPATCH_H
-  (__bridge_transfer IO*)s->io;
-  s->io = NULL;
+  if (s->io) {
+    CFRelease(s->io);
+    s->io = NULL;
+  }
 #else
   ssh_buffer_free(s->in_buffer);
   ssh_buffer_free(s->out_buffer);
