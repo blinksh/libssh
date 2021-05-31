@@ -738,6 +738,7 @@ int ssh_known_hosts_parse_line(const char *hostname,
                 "Failed to parse %s key for entry: %s!",
                 ssh_key_type_to_char(key_type),
                 e->unparsed);
+        rc = SSH_AGAIN;
         goto out;
     }
 
