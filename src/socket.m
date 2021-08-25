@@ -57,6 +57,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 
+const NSString *LibSSHBlockRunLoopMode = @"LibSSHBlockRunLoop";
 
 /**
  * @internal
@@ -134,8 +135,8 @@ struct ssh_socket_struct {
     [_outputStream close];
     [_inputStream close];
 
-    [_inputStream  removeFromRunLoop:_runLoop forMode:NSDefaultRunLoopMode];
-    [_outputStream removeFromRunLoop:_runLoop forMode:NSDefaultRunLoopMode];
+    [_inputStream  removeFromRunLoop:_runLoop forMode:LibSSHBlockRunLoopMode];
+    [_outputStream removeFromRunLoop:_runLoop forMode:LibSSHBlockRunLoopMode];
 
     [_outputStream setDelegate: nil];
     [_inputStream setDelegate: nil];
@@ -207,7 +208,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
 
     _in_source_ref = CFSocketCreateRunLoopSource(NULL, _in_sock_ref, 0);
     _out_fd = fdOut;
-    CFRunLoopAddSource(CFRunLoopGetCurrent(), _in_source_ref, kCFRunLoopDefaultMode);
+    CFRunLoopAddSource(CFRunLoopGetCurrent(), _in_source_ref, (__bridge CFStringRef)LibSSHBlockRunLoopMode);
 
     return SSH_OK;
 }
@@ -231,8 +232,8 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
 
   _ssh_socket->state = SSH_SOCKET_CONNECTING;
 
-  [_inputStream  scheduleInRunLoop:_runLoop forMode:NSDefaultRunLoopMode];
-  [_outputStream scheduleInRunLoop:_runLoop forMode:NSDefaultRunLoopMode];
+  [_inputStream  scheduleInRunLoop:_runLoop forMode:LibSSHBlockRunLoopMode];
+  [_outputStream scheduleInRunLoop:_runLoop forMode:LibSSHBlockRunLoopMode];
 
   [_inputStream open];
   [_outputStream open];
@@ -326,7 +327,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
     date = [NSDate distantFuture];
   }
 
-  BOOL res = [_runLoop runMode:NSDefaultRunLoopMode beforeDate:date];
+  BOOL res = [_runLoop runMode:LibSSHBlockRunLoopMode beforeDate:date];
   if (res == NO) {
     return SSH_AGAIN;
   } else {
@@ -339,7 +340,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
       if (len == 0) {
           return len;
       }
-    [_outputStream scheduleInRunLoop:_runLoop forMode:NSDefaultRunLoopMode];
+    [_outputStream scheduleInRunLoop:_runLoop forMode:LibSSHBlockRunLoopMode];
   }
   if (len > 0) {
       [_out_data appendBytes:buffer length:len];
@@ -375,7 +376,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
 
   [_out_data replaceBytesInRange:NSMakeRange(0, written) withBytes:NULL length:0];
   if (_out_data.length == 0) {
-    [_outputStream removeFromRunLoop:_runLoop forMode:NSDefaultRunLoopMode];
+    [_outputStream removeFromRunLoop:_runLoop forMode:LibSSHBlockRunLoopMode];
   }
 }
 
