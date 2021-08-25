@@ -135,6 +135,8 @@ struct ssh_socket_struct {
     [_outputStream close];
     [_inputStream close];
 
+    [_inputStream  removeFromRunLoop:_runLoop forMode:NSDefaultRunLoopMode];
+    [_outputStream removeFromRunLoop:_runLoop forMode:NSDefaultRunLoopMode];
     [_inputStream  removeFromRunLoop:_runLoop forMode:LibSSHBlockRunLoopMode];
     [_outputStream removeFromRunLoop:_runLoop forMode:LibSSHBlockRunLoopMode];
 
@@ -208,6 +210,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
 
     _in_source_ref = CFSocketCreateRunLoopSource(NULL, _in_sock_ref, 0);
     _out_fd = fdOut;
+    CFRunLoopAddSource(CFRunLoopGetCurrent(), _in_source_ref, kCFRunLoopDefaultMode);
     CFRunLoopAddSource(CFRunLoopGetCurrent(), _in_source_ref, (__bridge CFStringRef)LibSSHBlockRunLoopMode);
 
     return SSH_OK;
@@ -232,6 +235,8 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
 
   _ssh_socket->state = SSH_SOCKET_CONNECTING;
 
+  [_inputStream  scheduleInRunLoop:_runLoop forMode:NSDefaultRunLoopMode];
+  [_outputStream scheduleInRunLoop:_runLoop forMode:NSDefaultRunLoopMode];
   [_inputStream  scheduleInRunLoop:_runLoop forMode:LibSSHBlockRunLoopMode];
   [_outputStream scheduleInRunLoop:_runLoop forMode:LibSSHBlockRunLoopMode];
 
@@ -327,6 +332,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
     date = [NSDate distantFuture];
   }
 
+   // Special case
   BOOL res = [_runLoop runMode:LibSSHBlockRunLoopMode beforeDate:date];
   if (res == NO) {
     return SSH_AGAIN;
@@ -340,6 +346,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
       if (len == 0) {
           return len;
       }
+    [_outputStream scheduleInRunLoop:_runLoop forMode:NSDefaultRunLoopMode];
     [_outputStream scheduleInRunLoop:_runLoop forMode:LibSSHBlockRunLoopMode];
   }
   if (len > 0) {
@@ -376,6 +383,7 @@ void __in_sock_callback(CFSocketRef sock, CFSocketCallBackType type, CFDataRef a
 
   [_out_data replaceBytesInRange:NSMakeRange(0, written) withBytes:NULL length:0];
   if (_out_data.length == 0) {
+    [_outputStream removeFromRunLoop:_runLoop forMode:NSDefaultRunLoopMode];
     [_outputStream removeFromRunLoop:_runLoop forMode:LibSSHBlockRunLoopMode];
   }
 }
