@@ -108,7 +108,8 @@
 #ifdef HAVE_ECDH
 #define ECDH "ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521,"
 #define EC_HOSTKEYS "ecdsa-sha2-nistp521,ecdsa-sha2-nistp384,ecdsa-sha2-nistp256,"
-#define EC_PUBLIC_KEY_ALGORITHMS "sk-ecdsa-sha2-nistp256@openssh.com," \
+#define EC_PUBLIC_KEY_ALGORITHMS "webauthn-sk-ecdsa-sha2-nistp256@openssh.com,"                                \
+  "sk-ecdsa-sha2-nistp256@openssh.com," \
   "ecdsa-sha2-nistp521-cert-v01@openssh.com," \
                                  "ecdsa-sha2-nistp384-cert-v01@openssh.com," \
                                  "ecdsa-sha2-nistp256-cert-v01@openssh.com,"

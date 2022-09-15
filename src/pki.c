@@ -181,7 +181,8 @@ void ssh_key_clean (ssh_key key){
     if (key->type == SSH_KEYTYPE_SK_ECDSA ||
         key->type == SSH_KEYTYPE_SK_ED25519 ||
         key->type == SSH_KEYTYPE_SK_ECDSA_CERT01 ||
-        key->type == SSH_KEYTYPE_SK_ED25519_CERT01) {
+        key->type == SSH_KEYTYPE_SK_ED25519_CERT01 ||
+        key->type == SSH_KEYTYPE_WEBAUTHN_SK_ECDSA) {
         ssh_string_burn(key->sk_application);
         ssh_string_free(key->sk_application);
     }
@@ -313,6 +314,8 @@ const char *ssh_key_type_to_char(enum ssh_keytypes_e type) {
       return "sk-ecdsa-sha2-nistp256-cert-v01@openssh.com";
     case SSH_KEYTYPE_SK_ED25519_CERT01:
       return "sk-ssh-ed25519-cert-v01@openssh.com";
+    case SSH_KEYTYPE_WEBAUTHN_SK_ECDSA:
+      return "webauthn-sk-ecdsa-sha2-nistp256@openssh.com";
     case SSH_KEYTYPE_RSA1:
     case SSH_KEYTYPE_UNKNOWN:
       return NULL;
@@ -347,6 +350,8 @@ enum ssh_digest_e ssh_key_hash_from_name(const char *name)
         return SSH_DIGEST_AUTO;
     } else if (strcmp(name, "sk-ecdsa-sha2-nistp256@openssh.com") == 0) {
         return SSH_DIGEST_SHA256;
+    } else if (strcmp(name, "webauthn-sk-ecdsa-sha2-nistp256@openssh.com") == 0) {
+      return SSH_DIGEST_SHA256;
     } else if (strcmp(name, "sk-ssh-ed25519@openssh.com") == 0) {
         return SSH_DIGEST_AUTO;
     }
@@ -567,6 +572,8 @@ enum ssh_keytypes_e ssh_key_type_from_name(const char *name) {
         return SSH_KEYTYPE_ED25519_CERT01;
     } else if(strcmp(name, "sk-ecdsa-sha2-nistp256@openssh.com") == 0) {
         return SSH_KEYTYPE_SK_ECDSA;
+    }else if(strcmp(name, "webauthn-sk-ecdsa-sha2-nistp256@openssh.com") == 0) {
+      return SSH_KEYTYPE_WEBAUTHN_SK_ECDSA;
     } else if(strcmp(name, "sk-ecdsa-sha2-nistp256-cert-v01@openssh.com") == 0) {
         return SSH_KEYTYPE_SK_ECDSA_CERT01;
     } else if(strcmp(name, "sk-ssh-ed25519@openssh.com") == 0) {
@@ -670,6 +677,7 @@ int ssh_key_cmp(const ssh_key k1,
     }
 
     if (k1->type == SSH_KEYTYPE_SK_ECDSA ||
+        k1->type == SSH_KEYTYPE_WEBAUTHN_SK_ECDSA ||
         k1->type == SSH_KEYTYPE_SK_ED25519) {
         if (strncmp(ssh_string_get_char(k1->sk_application),
                 ssh_string_get_char(k2->sk_application),
@@ -722,6 +730,7 @@ void ssh_signature_free(ssh_signature sig)
         case SSH_KEYTYPE_ECDSA_P384:
         case SSH_KEYTYPE_ECDSA_P521:
         case SSH_KEYTYPE_SK_ECDSA:
+        case SSH_KEYTYPE_WEBAUTHN_SK_ECDSA:
 #ifdef HAVE_GCRYPT_ECC
             gcry_sexp_release(sig->ecdsa_sig);
 #elif defined HAVE_LIBMBEDCRYPTO
@@ -1250,6 +1259,7 @@ int pki_import_privkey_buffer(enum ssh_keytypes_e type,
         case SSH_KEYTYPE_ED25519_CERT01:
         case SSH_KEYTYPE_SK_ECDSA:
         case SSH_KEYTYPE_SK_ECDSA_CERT01:
+        case SSH_KEYTYPE_WEBAUTHN_SK_ECDSA:
         case SSH_KEYTYPE_SK_ED25519:
         case SSH_KEYTYPE_SK_ED25519_CERT01:
         case SSH_KEYTYPE_RSA1:
@@ -1348,6 +1358,7 @@ static int pki_import_pubkey_buffer(ssh_buffer buffer,
         case SSH_KEYTYPE_ECDSA_P384:
         case SSH_KEYTYPE_ECDSA_P521:
         case SSH_KEYTYPE_SK_ECDSA:
+        case SSH_KEYTYPE_WEBAUTHN_SK_ECDSA:
             {
                 ssh_string e = NULL;
                 ssh_string i = NULL;
@@ -1379,7 +1390,7 @@ static int pki_import_pubkey_buffer(ssh_buffer buffer,
                 }
 
                 /* Unpack SK specific parameters */
-                if (type == SSH_KEYTYPE_SK_ECDSA) {
+                if (type == SSH_KEYTYPE_SK_ECDSA || type == SSH_KEYTYPE_WEBAUTHN_SK_ECDSA) {
                     ssh_string application = ssh_buffer_get_ssh_string(buffer);
                     if (application == NULL) {
                         SSH_LOG(SSH_LOG_WARN, "SK Unpack error");
@@ -1903,6 +1914,7 @@ int ssh_pki_generate(enum ssh_keytypes_e type, int parameter,
         case SSH_KEYTYPE_ECDSA_P521_CERT01:
         case SSH_KEYTYPE_ED25519_CERT01:
         case SSH_KEYTYPE_SK_ECDSA:
+        case SSH_KEYTYPE_WEBAUTHN_SK_ECDSA:
         case SSH_KEYTYPE_SK_ECDSA_CERT01:
         case SSH_KEYTYPE_SK_ED25519:
         case SSH_KEYTYPE_SK_ED25519_CERT01:
@@ -2229,6 +2241,7 @@ int ssh_pki_import_signature_blob(const ssh_string sig_blob,
     }
 
     if (type == SSH_KEYTYPE_SK_ECDSA ||
+        type == SSH_KEYTYPE_WEBAUTHN_SK_ECDSA ||
         type == SSH_KEYTYPE_SK_ED25519) {
         rc = ssh_buffer_unpack(buf, "bd", &flags, &counter);
         if (rc < 0) {
@@ -2305,6 +2318,7 @@ int pki_key_check_hash_compatible(ssh_key key,
     case SSH_KEYTYPE_ECDSA_P256:
     case SSH_KEYTYPE_SK_ECDSA_CERT01:
     case SSH_KEYTYPE_SK_ECDSA:
+    case SSH_KEYTYPE_WEBAUTHN_SK_ECDSA:
         if (hash_type == SSH_DIGEST_SHA256) {
             return SSH_OK;
         }
@@ -2376,6 +2390,7 @@ int ssh_pki_signature_verify(ssh_session session,
     }
 
     if (key->type == SSH_KEYTYPE_SK_ECDSA ||
+        key->type == SSH_KEYTYPE_WEBAUTHN_SK_ECDSA ||
         key->type == SSH_KEYTYPE_SK_ECDSA_CERT01 ||
         key->type == SSH_KEYTYPE_SK_ED25519 ||
         key->type == SSH_KEYTYPE_SK_ED25519_CERT01) {
