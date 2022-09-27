@@ -544,8 +544,7 @@ int pki_key_compare(const ssh_key k1, const ssh_key k2, enum ssh_keycmp_e what)
         case SSH_KEYTYPE_ECDSA_P256:
         case SSH_KEYTYPE_ECDSA_P384:
         case SSH_KEYTYPE_ECDSA_P521:
-        case SSH_KEYTYPE_SK_ECDSA:
-        case SSH_KEYTYPE_WEBAUTHN_SK_ECDSA: {
+        case SSH_KEYTYPE_SK_ECDSA: {
             mbedtls_ecp_keypair *ecdsa1 = k1->ecdsa;
             mbedtls_ecp_keypair *ecdsa2 = k2->ecdsa;
 
@@ -717,7 +716,6 @@ ssh_string pki_publickey_to_blob(const ssh_key key)
         case SSH_KEYTYPE_ECDSA_P384:
         case SSH_KEYTYPE_ECDSA_P521:
         case SSH_KEYTYPE_SK_ECDSA:
-        case SSH_KEYTYPE_WEBAUTHN_SK_ECDSA:
             type_s =
                 ssh_string_from_char(pki_key_ecdsa_nid_to_char(key->ecdsa_nid));
             if (type_s == NULL) {
@@ -748,7 +746,7 @@ ssh_string pki_publickey_to_blob(const ssh_key key)
             SSH_STRING_FREE(e);
             e = NULL;
 
-            if ((key->type == SSH_KEYTYPE_SK_ECDSA || key->type == SSH_KEYTYPE_WEBAUTHN_SK_ECDSA) &&
+            if (key->type == SSH_KEYTYPE_SK_ECDSA &&
                 ssh_buffer_add_ssh_string(buffer, key->sk_application) < 0) {
                 goto fail;
             }
@@ -955,8 +953,7 @@ ssh_signature pki_signature_from_blob(const ssh_key pubkey,
         case SSH_KEYTYPE_ECDSA_P256:
         case SSH_KEYTYPE_ECDSA_P384:
         case SSH_KEYTYPE_ECDSA_P521:
-        case SSH_KEYTYPE_SK_ECDSA:
-        case SSH_KEYTYPE_WEBAUTHN_SK_ECDSA: {
+        case SSH_KEYTYPE_SK_ECDSA: {
             ssh_buffer b;
             ssh_string r;
             ssh_string s;
@@ -1344,7 +1341,6 @@ int pki_verify_data_signature(ssh_signature signature,
         case SSH_KEYTYPE_ECDSA_P384_CERT01:
         case SSH_KEYTYPE_ECDSA_P521_CERT01:
         case SSH_KEYTYPE_SK_ECDSA:
-        case SSH_KEYTYPE_WEBAUTHN_SK_ECDSA:
         case SSH_KEYTYPE_SK_ECDSA_CERT01:
             rc = mbedtls_ecdsa_verify(&pubkey->ecdsa->grp, hash, hlen,
                     &pubkey->ecdsa->Q, signature->ecdsa_sig.r,

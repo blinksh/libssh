@@ -676,7 +676,6 @@ int pki_key_compare(const ssh_key k1,
         case SSH_KEYTYPE_ECDSA_P384:
         case SSH_KEYTYPE_ECDSA_P521:
         case SSH_KEYTYPE_SK_ECDSA:
-        case SSH_KEYTYPE_WEBAUTHN_SK_ECDSA:
 #ifdef HAVE_OPENSSL_ECC
             {
                 const EC_POINT *p1 = EC_KEY_get0_public_key(k1->ecdsa);
@@ -1310,8 +1309,6 @@ ssh_string pki_publickey_to_blob(const ssh_key key)
         case SSH_KEYTYPE_ECDSA_P384:
         case SSH_KEYTYPE_ECDSA_P521:
         case SSH_KEYTYPE_SK_ECDSA:
-        case SSH_KEYTYPE_WEBAUTHN_SK_ECDSA:
-
 #ifdef HAVE_OPENSSL_ECC
             type_s = ssh_string_from_char(pki_key_ecdsa_nid_to_char(key->ecdsa_nid));
             if (type_s == NULL) {
@@ -1342,7 +1339,7 @@ ssh_string pki_publickey_to_blob(const ssh_key key)
             SSH_STRING_FREE(e);
             e = NULL;
 
-            if ((key->type == SSH_KEYTYPE_SK_ECDSA || key->type == SSH_KEYTYPE_WEBAUTHN_SK_ECDSA) &&
+            if (key->type == SSH_KEYTYPE_SK_ECDSA &&
                 ssh_buffer_add_ssh_string(buffer, key->sk_application) < 0) {
                 goto fail;
             }
@@ -1928,7 +1925,6 @@ ssh_signature pki_signature_from_blob(const ssh_key pubkey,
         case SSH_KEYTYPE_ECDSA_P384_CERT01:
         case SSH_KEYTYPE_ECDSA_P521_CERT01:
         case SSH_KEYTYPE_SK_ECDSA:
-        case SSH_KEYTYPE_WEBAUTHN_SK_ECDSA:
         case SSH_KEYTYPE_SK_ECDSA_CERT01:
 #ifdef HAVE_OPENSSL_ECC
             rc = pki_signature_from_ecdsa_blob(pubkey, sig_blob, sig);
@@ -2020,7 +2016,6 @@ static EVP_PKEY *pki_key_to_pkey(ssh_key key)
     case SSH_KEYTYPE_ECDSA_P384_CERT01:
     case SSH_KEYTYPE_ECDSA_P521_CERT01:
     case SSH_KEYTYPE_SK_ECDSA:
-    case SSH_KEYTYPE_WEBAUTHN_SK_ECDSA:
     case SSH_KEYTYPE_SK_ECDSA_CERT01:
 # if defined(HAVE_OPENSSL_ECC)
         if (key->ecdsa == NULL) {
