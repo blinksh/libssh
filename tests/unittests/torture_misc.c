@@ -656,6 +656,78 @@ static void torture_ssh_newline_vis(UNUSED_PARAM(void **state))
     assert_string_equal(buffer, "a\\nb\\n");
 }
 
+static void torture_ssh_check_hostname_syntax(void **state)
+{
+    int rc;
+    (void)state;
+
+    rc = ssh_check_hostname_syntax("duckduckgo.com");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("www.libssh.org");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("Some-Thing.com");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("amazon.a23456789012345678901234567890123456789012345678901234567890123");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("amazon.a23456789012345678901234567890123456789012345678901234567890123.a23456789012345678901234567890123456789012345678901234567890123.ok");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("amazon.a23456789012345678901234567890123456789012345678901234567890123.a23456789012345678901234567890123456789012345678901234567890123.a23456789012345678901234567890123456789012345678901234567890123");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("lavabo-inter.innocentes-manus-meas");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("localhost");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("a");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("a-0.b-b");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("libssh.");
+    assert_int_equal(rc, SSH_OK);
+
+    rc = ssh_check_hostname_syntax(NULL);
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("/");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("@");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("[");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("`");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("{");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("&");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("|");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("\"");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("`");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax(" ");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("*the+giant&\"rooks\".c0m");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("!www.libssh.org");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("--.--");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("libssh.a234567890123456789012345678901234567890123456789012345678901234");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("libssh.a234567890123456789012345678901234567890123456789012345678901234.a234567890123456789012345678901234567890123456789012345678901234");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("libssh-");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("fe80::9656:d028:8652:66b6");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax(".");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("..");
+    assert_int_equal(rc, SSH_ERROR);
+}
+
 int torture_run_tests(void) {
     int rc;
     struct CMUnitTest tests[] = {
@@ -678,6 +750,7 @@ int torture_run_tests(void) {
         cmocka_unit_test(torture_ssh_newline_vis),
         cmocka_unit_test(torture_ssh_mkdirs),
         cmocka_unit_test(torture_ssh_quote_file_name),
+        cmocka_unit_test(torture_ssh_check_hostname_syntax),
     };
 
     ssh_init();
