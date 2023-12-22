@@ -2,6 +2,7 @@
 
 #define LIBSSH_STATIC
 
+#include <errno.h>
 #include "torture.h"
 #include "libssh/options.h"
 #include "libssh/session.h"
@@ -997,6 +998,53 @@ static void torture_config_match_pattern(void **state)
 
 }
 
+static void torture_config_parse_uri(void **state)
+{
+    char *username = NULL;
+    char *hostname = NULL;
+    char *port = NULL;
+    int rc;
+
+    (void)state; /* unused */
+
+    rc = ssh_config_parse_uri("localhost", &username, &hostname, &port, false);
+    assert_return_code(rc, errno);
+    assert_null(username);
+    assert_string_equal(hostname, "localhost");
+    SAFE_FREE(hostname);
+    assert_null(port);
+
+    rc = ssh_config_parse_uri("1.2.3.4", &username, &hostname, &port, false);
+    assert_return_code(rc, errno);
+    assert_null(username);
+    assert_string_equal(hostname, "1.2.3.4");
+    SAFE_FREE(hostname);
+    assert_null(port);
+
+    rc = ssh_config_parse_uri("1.2.3.4:2222", &username, &hostname, &port, false);
+    assert_return_code(rc, errno);
+    assert_null(username);
+    assert_string_equal(hostname, "1.2.3.4");
+    SAFE_FREE(hostname);
+    assert_string_equal(port, "2222");
+    SAFE_FREE(port);
+
+    rc = ssh_config_parse_uri("[1:2:3::4]:2222", &username, &hostname, &port, false);
+    assert_return_code(rc, errno);
+    assert_null(username);
+    assert_string_equal(hostname, "1:2:3::4");
+    SAFE_FREE(hostname);
+    assert_string_equal(port, "2222");
+    SAFE_FREE(port);
+
+    /* do not want port */
+    rc = ssh_config_parse_uri("1:2:3::4", &username, &hostname, NULL, true);
+    assert_return_code(rc, errno);
+    assert_null(username);
+    assert_string_equal(hostname, "1:2:3::4");
+    SAFE_FREE(hostname);
+}
+
 
 int torture_run_tests(void) {
     int rc;
@@ -1012,6 +1060,7 @@ int torture_run_tests(void) {
         cmocka_unit_test(torture_config_rekey),
         cmocka_unit_test(torture_config_pubkeyacceptedkeytypes),
         cmocka_unit_test(torture_config_match_pattern),
+        cmocka_unit_test(torture_config_parse_uri),
     };
 
 
