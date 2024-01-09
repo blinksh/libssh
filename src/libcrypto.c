@@ -126,81 +126,47 @@ SHACTX sha1_init(void)
     return c;
 }
 
-void sha1_update(SHACTX c, const void *data, unsigned long len)
+void sha1_ctx_free(SHACTX c)
 {
-    EVP_DigestUpdate(c, data, len);
-}
-
-void sha1_final(unsigned char *md, SHACTX c)
-{
-    unsigned int mdlen = 0;
-
-    EVP_DigestFinal(c, md, &mdlen);
     EVP_MD_CTX_destroy(c);
 }
 
-void sha1(const unsigned char *digest, int len, unsigned char *hash)
+int sha1_update(SHACTX c, const void *data, unsigned long len)
+{
+    int rc = EVP_DigestUpdate(c, data, len);
+    if (rc != 1) {
+        return SSH_ERROR;
+    }
+    return SSH_OK;
+}
+
+int sha1_final(unsigned char *md, SHACTX c)
+{
+    unsigned int mdlen = 0;
+    int rc = EVP_DigestFinal(c, md, &mdlen);
+
+    EVP_MD_CTX_destroy(c);
+    if (rc != 1) {
+        return SSH_ERROR;
+    }
+    return SSH_OK;
+}
+
+int sha1(const unsigned char *digest, int len, unsigned char *hash)
 {
     SHACTX c = sha1_init();
-    if (c != NULL) {
-        sha1_update(c, digest, len);
-        sha1_final(hash, c);
+    int rc;
+
+    if (c == NULL) {
+        return SSH_ERROR;
     }
-}
-
-#ifdef HAVE_OPENSSL_ECC
-static const EVP_MD *nid_to_evpmd(int nid)
-{
-    switch (nid) {
-        case NID_X9_62_prime256v1:
-            return EVP_sha256();
-        case NID_secp384r1:
-            return EVP_sha384();
-        case NID_secp521r1:
-            return EVP_sha512();
-        default:
-            return NULL;
+    rc = sha1_update(c, digest, len);
+    if (rc != SSH_OK) {
+        sha1_ctx_free(c);
+        return SSH_ERROR;
     }
-
-    return NULL;
+    return  sha1_final(hash, c);
 }
-
-void evp(int nid, unsigned char *digest, int len, unsigned char *hash, unsigned int *hlen)
-{
-    const EVP_MD *evp_md = nid_to_evpmd(nid);
-    EVP_MD_CTX *md = EVP_MD_CTX_new();
-
-    EVP_DigestInit(md, evp_md);
-    EVP_DigestUpdate(md, digest, len);
-    EVP_DigestFinal(md, hash, hlen);
-    EVP_MD_CTX_free(md);
-}
-
-EVPCTX evp_init(int nid)
-{
-    const EVP_MD *evp_md = nid_to_evpmd(nid);
-
-    EVPCTX ctx = EVP_MD_CTX_new();
-    if (ctx == NULL) {
-        return NULL;
-    }
-
-    EVP_DigestInit(ctx, evp_md);
-
-    return ctx;
-}
-
-void evp_update(EVPCTX ctx, const void *data, unsigned long len)
-{
-    EVP_DigestUpdate(ctx, data, len);
-}
-
-void evp_final(EVPCTX ctx, unsigned char *md, unsigned int *mdlen)
-{
-    EVP_DigestFinal(ctx, md, mdlen);
-    EVP_MD_CTX_free(ctx);
-}
-#endif
 
 SHA256CTX sha256_init(void)
 {
@@ -218,26 +184,46 @@ SHA256CTX sha256_init(void)
     return c;
 }
 
-void sha256_update(SHA256CTX c, const void *data, unsigned long len)
+void sha256_ctx_free(SHA256CTX c)
 {
-    EVP_DigestUpdate(c, data, len);
-}
-
-void sha256_final(unsigned char *md, SHA256CTX c)
-{
-    unsigned int mdlen = 0;
-
-    EVP_DigestFinal(c, md, &mdlen);
     EVP_MD_CTX_destroy(c);
 }
 
-void sha256(const unsigned char *digest, int len, unsigned char *hash)
+int sha256_update(SHA256CTX c, const void *data, unsigned long len)
+{
+    int rc = EVP_DigestUpdate(c, data, len);
+    if (rc != 1) {
+        return SSH_ERROR;
+    }
+    return SSH_OK;
+}
+
+int sha256_final(unsigned char *md, SHA256CTX c)
+{
+    unsigned int mdlen = 0;
+    int rc = EVP_DigestFinal(c, md, &mdlen);
+
+    EVP_MD_CTX_destroy(c);
+    if (rc != 1) {
+        return SSH_ERROR;
+    }
+    return SSH_OK;
+}
+
+int sha256(const unsigned char *digest, int len, unsigned char *hash)
 {
     SHA256CTX c = sha256_init();
-    if (c != NULL) {
-        sha256_update(c, digest, len);
-        sha256_final(hash, c);
+    int rc;
+
+    if (c == NULL) {
+        return SSH_ERROR;
     }
+    rc = sha256_update(c, digest, len);
+    if (rc != SSH_OK) {
+        sha256_ctx_free(c);
+        return SSH_ERROR;
+    }
+    return sha256_final(hash, c);
 }
 
 SHA384CTX sha384_init(void)
@@ -256,26 +242,47 @@ SHA384CTX sha384_init(void)
     return c;
 }
 
-void sha384_update(SHA384CTX c, const void *data, unsigned long len)
+void
+sha384_ctx_free(SHA384CTX c)
 {
-    EVP_DigestUpdate(c, data, len);
-}
-
-void sha384_final(unsigned char *md, SHA384CTX c)
-{
-    unsigned int mdlen = 0;
-
-    EVP_DigestFinal(c, md, &mdlen);
     EVP_MD_CTX_destroy(c);
 }
 
-void sha384(const unsigned char *digest, int len, unsigned char *hash)
+int sha384_update(SHA384CTX c, const void *data, unsigned long len)
+{
+    int rc = EVP_DigestUpdate(c, data, len);
+    if (rc != 1) {
+        return SSH_ERROR;
+    }
+    return SSH_OK;
+}
+
+int sha384_final(unsigned char *md, SHA384CTX c)
+{
+    unsigned int mdlen = 0;
+    int rc = EVP_DigestFinal(c, md, &mdlen);
+
+    EVP_MD_CTX_destroy(c);
+    if (rc != 1) {
+        return SSH_ERROR;
+    }
+    return SSH_OK;
+}
+
+int sha384(const unsigned char *digest, int len, unsigned char *hash)
 {
     SHA384CTX c = sha384_init();
-    if (c != NULL) {
-        sha384_update(c, digest, len);
-        sha384_final(hash, c);
+    int rc;
+
+    if (c == NULL) {
+        return SSH_ERROR;
     }
+    rc = sha384_update(c, digest, len);
+    if (rc != SSH_OK) {
+        sha384_ctx_free(c);
+        return SSH_ERROR;
+    }
+    return sha384_final(hash, c);
 }
 
 SHA512CTX sha512_init(void)
@@ -294,26 +301,46 @@ SHA512CTX sha512_init(void)
     return c;
 }
 
-void sha512_update(SHA512CTX c, const void *data, unsigned long len)
+void sha512_ctx_free(SHA512CTX c)
 {
-    EVP_DigestUpdate(c, data, len);
-}
-
-void sha512_final(unsigned char *md, SHA512CTX c)
-{
-    unsigned int mdlen = 0;
-
-    EVP_DigestFinal(c, md, &mdlen);
     EVP_MD_CTX_destroy(c);
 }
 
-void sha512(const unsigned char *digest, int len, unsigned char *hash)
+int sha512_update(SHA512CTX c, const void *data, unsigned long len)
+{
+    int rc = EVP_DigestUpdate(c, data, len);
+    if (rc != 1) {
+        return SSH_ERROR;
+    }
+    return SSH_OK;
+}
+
+int sha512_final(unsigned char *md, SHA512CTX c)
+{
+    unsigned int mdlen = 0;
+    int rc = EVP_DigestFinal(c, md, &mdlen);
+
+    EVP_MD_CTX_destroy(c);
+    if (rc != 1) {
+        return SSH_ERROR;
+    }
+    return SSH_OK;
+}
+
+int sha512(const unsigned char *digest, int len, unsigned char *hash)
 {
     SHA512CTX c = sha512_init();
-    if (c != NULL) {
-        sha512_update(c, digest, len);
-        sha512_final(hash, c);
+    int rc;
+
+    if (c == NULL) {
+        return SSH_ERROR;
     }
+    rc = sha512_update(c, digest, len);
+    if (rc != SSH_OK) {
+        sha512_ctx_free(c);
+        return SSH_ERROR;
+    }
+    return sha512_final(hash, c);
 }
 
 MD5CTX md5_init(void)
@@ -332,18 +359,32 @@ MD5CTX md5_init(void)
     return c;
 }
 
-void md5_update(MD5CTX c, const void *data, unsigned long len)
+void md5_ctx_free(MD5CTX c)
 {
-    EVP_DigestUpdate(c, data, len);
-}
-
-void md5_final(unsigned char *md, MD5CTX c)
-{
-    unsigned int mdlen = 0;
-
-    EVP_DigestFinal(c, md, &mdlen);
     EVP_MD_CTX_destroy(c);
 }
+
+int md5_update(MD5CTX c, const void *data, unsigned long len)
+{
+    int rc = EVP_DigestUpdate(c, data, len);
+    if (rc != 1) {
+        return SSH_ERROR;
+    }
+    return SSH_OK;
+}
+
+int md5_final(unsigned char *md, MD5CTX c)
+{
+    unsigned int mdlen = 0;
+    int rc = EVP_DigestFinal(c, md, &mdlen);
+
+    EVP_MD_CTX_destroy(c);
+    if (rc != 1) {
+        return SSH_ERROR;
+    }
+    return SSH_OK;
+}
+
 
 #ifdef HAVE_OPENSSL_EVP_KDF_CTX_NEW_ID
 static const EVP_MD *sshkdf_digest_to_md(enum ssh_kdf_digest digest_type)
@@ -392,7 +433,7 @@ int ssh_kdf(struct ssh_crypto_struct *crypto,
         goto out;
     }
     rc = EVP_KDF_ctrl(ctx, EVP_KDF_CTRL_SET_SSHKDF_SESSION_ID,
-                      crypto->session_id, crypto->digest_len);
+                      crypto->session_id, crypto->session_id_len);
     if (rc != 1) {
         goto out;
     }
@@ -536,7 +577,7 @@ static int evp_cipher_set_encrypt_key(struct ssh_cipher_struct *cipher,
     int rc;
 
     evp_cipher_init(cipher);
-    EVP_CIPHER_CTX_init(cipher->ctx);
+    EVP_CIPHER_CTX_reset(cipher->ctx);
 
     rc = EVP_EncryptInit_ex(cipher->ctx, cipher->cipher, NULL, key, IV);
     if (rc != 1){
@@ -569,7 +610,7 @@ static int evp_cipher_set_decrypt_key(struct ssh_cipher_struct *cipher,
     int rc;
 
     evp_cipher_init(cipher);
-    EVP_CIPHER_CTX_init(cipher->ctx);
+    EVP_CIPHER_CTX_reset(cipher->ctx);
 
     rc = EVP_DecryptInit_ex(cipher->ctx, cipher->cipher, NULL, key, IV);
     if (rc != 1){
@@ -652,7 +693,6 @@ static void evp_cipher_decrypt(struct ssh_cipher_struct *cipher,
 
 static void evp_cipher_cleanup(struct ssh_cipher_struct *cipher) {
     if (cipher->ctx != NULL) {
-        EVP_CIPHER_CTX_cleanup(cipher->ctx);
         EVP_CIPHER_CTX_free(cipher->ctx);
     }
 }
@@ -1084,11 +1124,11 @@ int ssh_crypto_init(void)
     if (libcrypto_initialized) {
         return SSH_OK;
     }
-    if (SSLeay() != OPENSSL_VERSION_NUMBER){
+    if (OpenSSL_version_num() != OPENSSL_VERSION_NUMBER){
         SSH_LOG(SSH_LOG_WARNING, "libssh compiled with %s "
             "headers, currently running with %s.",
             OPENSSL_VERSION_TEXT,
-            SSLeay_version(SSLeay())
+            OpenSSL_version(OpenSSL_version_num())
         );
     }
 #ifdef CAN_DISABLE_AESNI

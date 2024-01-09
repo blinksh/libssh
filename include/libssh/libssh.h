@@ -1,7 +1,7 @@
 /*
  * This file is part of the SSH Library
  *
- * Copyright (c) 2003-2009 by Aris Adamantiadis
+ * Copyright (c) 2003-2021 by Aris Adamantiadis and the libssh team
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,6 +20,8 @@
 
 #ifndef _LIBSSH_H
 #define _LIBSSH_H
+
+#include <libssh/libssh_version.h>
 
 #if defined _WIN32 || defined __CYGWIN__
   #ifdef LIBSSH_STATIC
@@ -79,23 +81,6 @@
 
 #define SSH_STRINGIFY(s) SSH_TOSTRING(s)
 #define SSH_TOSTRING(s) #s
-
-/* libssh version macros */
-#define SSH_VERSION_INT(a, b, c) ((a) << 16 | (b) << 8 | (c))
-#define SSH_VERSION_DOT(a, b, c) a ##.## b ##.## c
-#define SSH_VERSION(a, b, c) SSH_VERSION_DOT(a, b, c)
-
-/* libssh version */
-#define LIBSSH_VERSION_MAJOR  0
-#define LIBSSH_VERSION_MINOR  9
-#define LIBSSH_VERSION_MICRO  3
-
-#define LIBSSH_VERSION_INT SSH_VERSION_INT(LIBSSH_VERSION_MAJOR, \
-                                           LIBSSH_VERSION_MINOR, \
-                                           LIBSSH_VERSION_MICRO)
-#define LIBSSH_VERSION     SSH_VERSION(LIBSSH_VERSION_MAJOR, \
-                                       LIBSSH_VERSION_MINOR, \
-                                       LIBSSH_VERSION_MICRO)
 
 /* GCC have printf type attribute check.  */
 #ifdef __GNUC__

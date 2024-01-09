@@ -285,9 +285,7 @@ static int stop_server(void **state)
     assert_non_null(s);
 
     rc = torture_terminate_process(s->srv_pidfile);
-    if (rc != 0) {
-        fprintf(stderr, "XXXXXX Failed to terminate sshd\n");
-    }
+    assert_return_code(rc, errno);
 
     unlink(s->srv_pidfile);
 
@@ -513,6 +511,12 @@ static void torture_server_config_ciphers(void **state)
         /* Try each algorithm individually */
         j = 0;
         while(tokens->tokens[j] != NULL) {
+            char *cmp = strstr(OPENSSH_CIPHERS, tokens->tokens[j]);
+            if (cmp == NULL) {
+                /* This cipher is not supported by the OpenSSH. Skip it */
+                j++;
+                continue;
+            }
             snprintf(config_content,
                     sizeof(config_content),
                     "HostKey %s\nCiphers %s\n",

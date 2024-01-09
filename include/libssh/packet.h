@@ -63,6 +63,7 @@ SSH_PACKET_CALLBACK(ssh_packet_ext_info);
 SSH_PACKET_CALLBACK(ssh_packet_kexdh_init);
 #endif
 
+int ssh_packet_send_newkeys(ssh_session session);
 int ssh_packet_send_unimplemented(ssh_session session, uint32_t seqnum);
 int ssh_packet_parse_type(ssh_session session);
 //int packet_flush(ssh_session session, int enforce_blocking);
@@ -80,7 +81,7 @@ int ssh_packet_decrypt(ssh_session session, uint8_t *destination, uint8_t *sourc
         size_t start, size_t encrypted_size);
 unsigned char *ssh_packet_encrypt(ssh_session session,
                                   void *packet,
-                                  unsigned int len);
+                                  uint32_t len);
 int ssh_packet_hmac_verify(ssh_session session, const void *data, size_t len,
                            unsigned char *mac, enum ssh_hmac_e type);
 int ssh_packet_set_newkeys(ssh_session session,

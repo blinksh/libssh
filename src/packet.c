@@ -366,6 +366,11 @@ static enum ssh_packet_filter_result_e ssh_packet_incoming_filter(ssh_session se
          * - session->dh_handhsake_state = DH_STATE_NEWKEYS_SENT
          * */
 
+        if (!session->server) {
+            rc = SSH_PACKET_DENIED;
+            break;
+        }
+
         if (session->session_state != SSH_SESSION_STATE_DH) {
             rc = SSH_PACKET_DENIED;
             break;
@@ -688,18 +693,15 @@ static enum ssh_packet_filter_result_e ssh_packet_incoming_filter(ssh_session se
         /*
          * States required:
          * - session_state == SSH_SESSION_STATE_AUTHENTICATED
-         * - session->global_req_state == SSH_CHANNEL_REQ_STATE_PENDING
          *
          * Transitions:
-         * - session->global_req_state == SSH_CHANNEL_REQ_STATE_ACCEPTED
+         * - From channel->request_state == SSH_CHANNEL_REQ_STATE_PENDING
+         * - To   channel->request_state = SSH_CHANNEL_REQ_STATE_ACCEPTED
+         *
+         * If not in a pending state, message is ignored in the callback handler.
          * */
 
         if (session->session_state != SSH_SESSION_STATE_AUTHENTICATED) {
-            rc = SSH_PACKET_DENIED;
-            break;
-        }
-
-        if (session->global_req_state != SSH_CHANNEL_REQ_STATE_PENDING) {
             rc = SSH_PACKET_DENIED;
             break;
         }
@@ -710,18 +712,15 @@ static enum ssh_packet_filter_result_e ssh_packet_incoming_filter(ssh_session se
         /*
          * States required:
          * - session_state == SSH_SESSION_STATE_AUTHENTICATED
-         * - session->global_req_state == SSH_CHANNEL_REQ_STATE_PENDING
          *
          * Transitions:
-         * - session->global_req_state == SSH_CHANNEL_REQ_STATE_DENIED
+         * - From channel->request_state == SSH_CHANNEL_REQ_STATE_PENDING
+         * - To   channel->request_state = SSH_CHANNEL_REQ_STATE_ACCEPTED
+         *
+         * If not in a pending state, message is ignored in the callback handler.
          * */
 
         if (session->session_state != SSH_SESSION_STATE_AUTHENTICATED) {
-            rc = SSH_PACKET_DENIED;
-            break;
-        }
-
-        if (session->global_req_state != SSH_CHANNEL_REQ_STATE_PENDING) {
             rc = SSH_PACKET_DENIED;
             break;
         }
@@ -878,10 +877,12 @@ static enum ssh_packet_filter_result_e ssh_packet_incoming_filter(ssh_session se
         /*
          * States required:
          * - session_state == SSH_SESSION_STATE_AUTHENTICATED
-         * - channel->request_state == SSH_CHANNEL_REQ_STATE_PENDING
          *
          * Transitions:
-         * - channel->request_state = SSH_CHANNEL_REQ_STATE_ACCEPTED
+         * - From channel->request_state == SSH_CHANNEL_REQ_STATE_PENDING
+         * - To   channel->request_state = SSH_CHANNEL_REQ_STATE_ACCEPTED
+         *
+         * If not in a pending state, message is ignored in the callback handler.
          * */
 
         if (session->session_state != SSH_SESSION_STATE_AUTHENTICATED) {
@@ -895,10 +896,12 @@ static enum ssh_packet_filter_result_e ssh_packet_incoming_filter(ssh_session se
         /*
          * States required:
          * - session_state == SSH_SESSION_STATE_AUTHENTICATED
-         * - channel->request_state == SSH_CHANNEL_REQ_STATE_PENDING
          *
          * Transitions:
-         * - channel->request_state = SSH_CHANNEL_REQ_STATE_DENIED
+         * - From channel->request_state == SSH_CHANNEL_REQ_STATE_PENDING
+         * - To   channel->request_state = SSH_CHANNEL_REQ_STATE_ACCEPTED
+         *
+         * If not in a pending state, message is ignored in the callback handler.
          * */
 
         if (session->session_state != SSH_SESSION_STATE_AUTHENTICATED) {
@@ -1306,6 +1309,19 @@ int ssh_packet_socket_callback(const void *data, size_t receivedlen, void *user)
             }
 #endif /* WITH_ZLIB */
             payloadsize = ssh_buffer_get_len(session->in_buffer);
+            if (session->recv_seq == UINT32_MAX) {
+                /* Overflowing sequence numbers is always fishy */
+                if (crypto == NULL) {
+                    /* don't allow sequence number overflow when unencrypted */
+                    ssh_set_error(session,
+                                  SSH_FATAL,
+                                  "Incoming sequence number overflow");
+                    goto error;
+                } else {
+                    SSH_LOG(SSH_LOG_WARNING,
+                            "Incoming sequence number overflow");
+                }
+            }
             session->recv_seq++;
             if (crypto != NULL) {
                 struct ssh_cipher_struct *cipher = NULL;
@@ -1328,7 +1344,19 @@ int ssh_packet_socket_callback(const void *data, size_t receivedlen, void *user)
             SSH_LOG(SSH_LOG_PACKET,
                     "packet: read type %hhd [len=%d,padding=%hhd,comp=%d,payload=%d]",
                     session->in_packet.type, packet_len, padding, compsize, payloadsize);
+            if (crypto == NULL) {
+                /* In strict kex, only a few packets are allowed. Taint the session
+                 * if we received packets that are normally allowed but to be
+                 * refused if we are in strict kex when KEX is over.
+                 */
+                uint8_t type = session->in_packet.type;
 
+                if (type != SSH2_MSG_KEXINIT && type != SSH2_MSG_NEWKEYS &&
+                    (type < SSH2_MSG_KEXDH_INIT ||
+                     type > SSH2_MSG_KEX_DH_GEX_REQUEST)) {
+                    session->flags |= SSH_SESSION_FLAG_KEX_TAINTED;
+                }
+            }
             /* Check if the packet is expected */
             filter_result = ssh_packet_incoming_filter(session);
 
@@ -1344,6 +1372,9 @@ int ssh_packet_socket_callback(const void *data, size_t receivedlen, void *user)
                               session->in_packet.type);
                 goto error;
             case SSH_PACKET_UNKNOWN:
+                if (crypto == NULL) {
+                    session->flags |= SSH_SESSION_FLAG_KEX_TAINTED;
+                }
                 ssh_packet_send_unimplemented(session, session->recv_seq - 1);
                 break;
             }
@@ -1412,31 +1443,41 @@ static void ssh_packet_socket_controlflow_callback(int code, void *userdata)
     }
 }
 
-void ssh_packet_register_socket_callback(ssh_session session, ssh_socket s){
-	session->socket_callbacks.data=ssh_packet_socket_callback;
-	session->socket_callbacks.connected=NULL;
-    session->socket_callbacks.controlflow = ssh_packet_socket_controlflow_callback;
-	session->socket_callbacks.userdata=session;
-	ssh_socket_set_callbacks(s,&session->socket_callbacks);
+void ssh_packet_register_socket_callback(ssh_session session, ssh_socket s)
+{
+    struct ssh_socket_callbacks_struct *callbacks = &session->socket_callbacks;
+
+    callbacks->data = ssh_packet_socket_callback;
+    callbacks->connected = NULL;
+    callbacks->controlflow = ssh_packet_socket_controlflow_callback;
+    callbacks->userdata = session;
+    ssh_socket_set_callbacks(s, callbacks);
 }
 
 /** @internal
  * @brief sets the callbacks for the packet layer
  */
-void ssh_packet_set_callbacks(ssh_session session, ssh_packet_callbacks callbacks){
-  if(session->packet_callbacks == NULL){
-    session->packet_callbacks = ssh_list_new();
-  }
-  if (session->packet_callbacks != NULL) {
+void
+ssh_packet_set_callbacks(ssh_session session, ssh_packet_callbacks callbacks)
+{
+    if (session->packet_callbacks == NULL) {
+        session->packet_callbacks = ssh_list_new();
+        if (session->packet_callbacks == NULL) {
+            ssh_set_error_oom(session);
+            return;
+        }
+    }
     ssh_list_append(session->packet_callbacks, callbacks);
-  }
 }
 
 /** @internal
  * @brief remove the callbacks from the packet layer
  */
-void ssh_packet_remove_callbacks(ssh_session session, ssh_packet_callbacks callbacks){
+void
+ssh_packet_remove_callbacks(ssh_session session, ssh_packet_callbacks callbacks)
+{
     struct ssh_iterator *it = NULL;
+
     it = ssh_list_find(session->packet_callbacks, callbacks);
     if (it != NULL) {
         ssh_list_remove(session->packet_callbacks, it);
@@ -1446,12 +1487,15 @@ void ssh_packet_remove_callbacks(ssh_session session, ssh_packet_callbacks callb
 /** @internal
  * @brief sets the default packet handlers
  */
-void ssh_packet_set_default_callbacks(ssh_session session){
-	session->default_packet_callbacks.start=1;
-	session->default_packet_callbacks.n_callbacks=sizeof(default_packet_handlers)/sizeof(ssh_packet_callback);
-	session->default_packet_callbacks.user=session;
-	session->default_packet_callbacks.callbacks=default_packet_handlers;
-	ssh_packet_set_callbacks(session, &session->default_packet_callbacks);
+void ssh_packet_set_default_callbacks(ssh_session session)
+{
+    struct ssh_packet_callbacks_struct *c = &session->default_packet_callbacks;
+
+    c->start = 1;
+    c->n_callbacks = sizeof(default_packet_handlers) / sizeof(ssh_packet_callback);
+    c->user = session;
+    c->callbacks = default_packet_handlers;
+    ssh_packet_set_callbacks(session, c);
 }
 
 /** @internal
@@ -1505,7 +1549,33 @@ void ssh_packet_process(ssh_session session, uint8_t type)
             SSH_LOG(SSH_LOG_RARE, "Failed to send unimplemented: %s",
                     ssh_get_error(session));
         }
+        if (session->current_crypto == NULL) {
+            session->flags |= SSH_SESSION_FLAG_KEX_TAINTED;
+        }
     }
+}
+
+/** @internal
+ * @brief sends a SSH_MSG_NEWKEYS when enabling the new negotiated ciphers
+ * @param session the SSH session
+ * @return SSH_ERROR on error, else SSH_OK
+ */
+int ssh_packet_send_newkeys(ssh_session session)
+{
+    int rc;
+
+    /* Send the MSG_NEWKEYS */
+    rc = ssh_buffer_add_u8(session->out_buffer, SSH2_MSG_NEWKEYS);
+    if (rc < 0) {
+        return rc;
+    }
+
+    rc = ssh_packet_send(session);
+    if (rc == SSH_ERROR) {
+        return rc;
+    }
+    SSH_LOG(SSH_LOG_DEBUG, "SSH_MSG_NEWKEYS sent");
+    return rc;
 }
 
 /** @internal
@@ -1813,6 +1883,10 @@ int ssh_packet_send(ssh_session session)
     if (rc == SSH_OK && type == SSH2_MSG_NEWKEYS) {
         struct ssh_iterator *it;
 
+        if (session->flags & SSH_SESSION_FLAG_KEX_STRICT) {
+            /* reset packet sequence number when running in strict kex mode */
+            session->send_seq = 0;
+        }
         for (it = ssh_list_get_iterator(session->out_queue);
              it != NULL;
              it = ssh_list_get_iterator(session->out_queue)) {
@@ -1899,7 +1973,7 @@ ssh_packet_set_newkeys(ssh_session session,
 
     /* Both sides switched: do the actual switch now */
     if (session->next_crypto->used == SSH_DIRECTION_BOTH) {
-        size_t digest_len;
+        size_t session_id_len;
 
         if (session->current_crypto != NULL) {
             crypto_free(session->current_crypto);
@@ -1916,8 +1990,8 @@ ssh_packet_set_newkeys(ssh_session session,
             return SSH_ERROR;
         }
 
-        digest_len = session->current_crypto->digest_len;
-        session->next_crypto->session_id = malloc(digest_len);
+        session_id_len = session->current_crypto->session_id_len;
+        session->next_crypto->session_id = malloc(session_id_len);
         if (session->next_crypto->session_id == NULL) {
             ssh_set_error_oom(session);
             return SSH_ERROR;
@@ -1925,7 +1999,8 @@ ssh_packet_set_newkeys(ssh_session session,
 
         memcpy(session->next_crypto->session_id,
                session->current_crypto->session_id,
-               digest_len);
+               session_id_len);
+        session->next_crypto->session_id_len = session_id_len;
 
         return SSH_OK;
     }

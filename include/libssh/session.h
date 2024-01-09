@@ -79,6 +79,17 @@ enum ssh_pending_call_e {
 /* Client successfully authenticated */
 #define SSH_SESSION_FLAG_AUTHENTICATED 2
 
+/* The KEXINIT message can be sent first by either of the parties so this flag
+ * indicates that the message was already sent to make sure it is sent and avoid
+ * sending it twice during key exchange to simplify the state machine. */
+#define SSH_SESSION_FLAG_KEXINIT_SENT 4
+
+/* The current SSH2 session implements the "strict KEX" feature and should behave
+ * differently on SSH2_MSG_NEWKEYS. */
+#define SSH_SESSION_FLAG_KEX_STRICT 0x0010
+/* Unexpected packets have been sent while the session was still unencrypted */
+#define SSH_SESSION_FLAG_KEX_TAINTED 0x0020
+
 /* codes to use with ssh_handle_packets*() */
 /* Infinite timeout */
 #define SSH_TIMEOUT_INFINITE -1
@@ -135,10 +146,8 @@ struct ssh_session_struct {
     /* Extensions negotiated using RFC 8308 */
     uint32_t extensions;
 
-    ssh_string banner; /* that's the issue banner from
-                       the server */
-    char *discon_msg; /* disconnect message from
-                         the remote host */
+    ssh_string banner; /* that's the issue banner from the server */
+    char *discon_msg; /* disconnect message from the remote host */
     ssh_buffer in_buffer;
     PACKET in_packet;
     ssh_buffer out_buffer;
@@ -162,25 +171,33 @@ struct ssh_session_struct {
         uint32_t current_method;
     } auth;
 
+    /* Sending this flag before key exchange to save one round trip during the
+     * key exchange. This might make sense on high-latency connections.
+     * So far internal only for testing. Usable only on the client side --
+     * there is no key exchange method that would start with server message */
+    bool send_first_kex_follows;
     /*
      * RFC 4253, 7.1: if the first_kex_packet_follows flag was set in
      * the received SSH_MSG_KEXINIT, but the guess was wrong, this
      * field will be set such that the following guessed packet will
-     * be ignored.  Once that packet has been received and ignored,
-     * this field is cleared.
+     * be ignored on the receiving side.  Once that packet has been received and
+     * ignored, this field is cleared.
+     * On the sending side, this is set after we got peer KEXINIT message and we
+     * need to resend the initial message of the negotiated KEX algorithm.
      */
-    int first_kex_follows_guess_wrong;
+    bool first_kex_follows_guess_wrong;
 
     ssh_buffer in_hashbuf;
     ssh_buffer out_hashbuf;
     struct ssh_crypto_struct *current_crypto;
-    struct ssh_crypto_struct *next_crypto;  /* next_crypto is going to be used after a SSH2_MSG_NEWKEYS */
+    /* next_crypto is going to be used after a SSH2_MSG_NEWKEYS */
+    struct ssh_crypto_struct *next_crypto;
 
     struct ssh_list *channels; /* linked list of channels */
     int maxchannel;
     ssh_agent agent; /* ssh agent */
 
-/* keyb interactive data */
+    /* keyboard interactive data */
     struct ssh_kbdint_struct *kbdint;
     struct ssh_gssapi_struct *gssapi;
 
@@ -197,7 +214,8 @@ struct ssh_session_struct {
 
     /* auths accepted by server */
     struct ssh_list *ssh_message_list; /* list of delayed SSH messages */
-    int (*ssh_message_callback)( struct ssh_session_struct *session, ssh_message msg, void *userdata);
+    int (*ssh_message_callback)(struct ssh_session_struct *session,
+                                ssh_message msg, void *userdata);
     void *ssh_message_callback_data;
     ssh_server_callbacks server_callbacks;
     void (*ssh_connection_callback)( struct ssh_session_struct *session);
@@ -227,7 +245,7 @@ struct ssh_session_struct {
         char *custombanner;
         unsigned long timeout; /* seconds */
         unsigned long timeout_usec;
-        unsigned int port;
+        uint16_t port;
         socket_t fd;
         int StrictHostKeyChecking;
         char compressionlevel;

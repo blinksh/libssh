@@ -17,7 +17,14 @@
 #include "misc.c"
 #include "error.c"
 
+#ifdef _WIN32
+#include <netioapi.h>
+#else
+#include <net/if.h>
+#endif
+
 #define TORTURE_TEST_DIR "/usr/local/bin/truc/much/.."
+#define TORTURE_IPV6_LOCAL_LINK "fe80::98e1:82ff:fe8d:28b3%%%s"
 
 const char template[] = "temp_dir_XXXXXX";
 
@@ -209,7 +216,8 @@ static void torture_timeout_elapsed(void **state){
     struct ssh_timestamp ts;
     (void) state;
     ssh_timestamp_init(&ts);
-    usleep(50000);
+    usleep(30000);
+
     assert_true(ssh_timeout_elapsed(&ts,25));
     assert_false(ssh_timeout_elapsed(&ts,30000));
     assert_false(ssh_timeout_elapsed(&ts,75));
@@ -655,6 +663,116 @@ static void torture_ssh_newline_vis(UNUSED_PARAM(void **state))
     assert_string_equal(buffer, "a\\nb\\n");
 }
 
+static void torture_ssh_check_hostname_syntax(void **state)
+{
+    int rc;
+    (void)state;
+
+    rc = ssh_check_hostname_syntax("duckduckgo.com");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("www.libssh.org");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("Some-Thing.com");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("amazon.a23456789012345678901234567890123456789012345678901234567890123");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("amazon.a23456789012345678901234567890123456789012345678901234567890123.a23456789012345678901234567890123456789012345678901234567890123.ok");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("amazon.a23456789012345678901234567890123456789012345678901234567890123.a23456789012345678901234567890123456789012345678901234567890123.a23456789012345678901234567890123456789012345678901234567890123");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("lavabo-inter.innocentes-manus-meas");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("localhost");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("a");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("a-0.b-b");
+    assert_int_equal(rc, SSH_OK);
+    rc = ssh_check_hostname_syntax("libssh.");
+    assert_int_equal(rc, SSH_OK);
+
+    rc = ssh_check_hostname_syntax(NULL);
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("/");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("@");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("[");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("`");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("{");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("&");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("|");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("\"");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("`");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax(" ");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("*the+giant&\"rooks\".c0m");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("!www.libssh.org");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("--.--");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("libssh.a234567890123456789012345678901234567890123456789012345678901234");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("libssh.a234567890123456789012345678901234567890123456789012345678901234.a234567890123456789012345678901234567890123456789012345678901234");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("libssh-");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("fe80::9656:d028:8652:66b6");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax(".");
+    assert_int_equal(rc, SSH_ERROR);
+    rc = ssh_check_hostname_syntax("..");
+    assert_int_equal(rc, SSH_ERROR);
+}
+
+static void torture_ssh_is_ipaddr(void **state) {
+    int rc;
+    char *interf = malloc(64);
+    char *test_interf = malloc(128);
+    (void)state;
+
+    assert_non_null(interf);
+    assert_non_null(test_interf);
+    rc = ssh_is_ipaddr("201.255.3.69");
+    assert_int_equal(rc, 1);
+    rc = ssh_is_ipaddr("::1");
+    assert_int_equal(rc, 1);
+    rc = ssh_is_ipaddr("2001:0db8:85a3:0000:0000:8a2e:0370:7334");
+    assert_int_equal(rc, 1);
+    if_indextoname(1, interf);
+    assert_non_null(interf);
+    rc = sprintf(test_interf, TORTURE_IPV6_LOCAL_LINK, interf);
+    /* the "%%s" is not written */
+    assert_int_equal(rc, strlen(interf) + strlen(TORTURE_IPV6_LOCAL_LINK) - 3);
+    rc = ssh_is_ipaddr(test_interf);
+    assert_int_equal(rc, 1);
+    free(interf);
+    free(test_interf);
+
+    rc = ssh_is_ipaddr("..");
+    assert_int_equal(rc, 0);
+    rc = ssh_is_ipaddr(":::");
+    assert_int_equal(rc, 0);
+    rc = ssh_is_ipaddr("1.1.1.1.1");
+    assert_int_equal(rc, 0);
+    rc = ssh_is_ipaddr("1.1");
+    assert_int_equal(rc, 0);
+    rc = ssh_is_ipaddr("caesar");
+    assert_int_equal(rc, 0);
+    rc = ssh_is_ipaddr("::xa:1");
+    assert_int_equal(rc, 0);
+}
+
 int torture_run_tests(void) {
     int rc;
     struct CMUnitTest tests[] = {
@@ -677,6 +795,8 @@ int torture_run_tests(void) {
         cmocka_unit_test(torture_ssh_newline_vis),
         cmocka_unit_test(torture_ssh_mkdirs),
         cmocka_unit_test(torture_ssh_quote_file_name),
+        cmocka_unit_test(torture_ssh_check_hostname_syntax),
+        cmocka_unit_test(torture_ssh_is_ipaddr),
     };
 
     ssh_init();

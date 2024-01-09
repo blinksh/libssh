@@ -110,6 +110,18 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
       goto error;
   }
 
+  if (session->flags & SSH_SESSION_FLAG_KEX_STRICT) {
+      /* reset packet sequence number when running in strict kex mode */
+      session->recv_seq = 0;
+      /* Check that we aren't tainted */
+      if (session->flags & SSH_SESSION_FLAG_KEX_TAINTED) {
+          ssh_set_error(session,
+                        SSH_FATAL,
+                        "Received unexpected packets in strict KEX mode.");
+          goto error;
+      }
+  }
+
   if(session->server){
     /* server things are done in server.c */
     session->dh_handshake_state=DH_STATE_FINISHED;
@@ -129,6 +141,8 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
     }
 
     rc = ssh_pki_import_signature_blob(sig_blob, server_key, &sig);
+    ssh_string_burn(sig_blob);
+    SSH_STRING_FREE(sig_blob);
     if (rc != SSH_OK) {
         goto error;
     }
@@ -152,10 +166,11 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
                                   server_key,
                                   session->next_crypto->secret_hash,
                                   session->next_crypto->digest_len);
-    ssh_string_burn(sig_blob);
-    SSH_STRING_FREE(sig_blob);
-    ssh_signature_free(sig);
+    SSH_SIGNATURE_FREE(sig);
     if (rc == SSH_ERROR) {
+      ssh_set_error(session,
+                    SSH_FATAL,
+                    "Failed to verify server hostkey signature");
       goto error;
     }
     SSH_LOG(SSH_LOG_PROTOCOL,"Signature verified and valid");
@@ -170,6 +185,9 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
   session->ssh_connection_callback(session);
   return SSH_PACKET_USED;
 error:
+  SSH_SIGNATURE_FREE(sig);
+  ssh_string_burn(sig_blob);
+  SSH_STRING_FREE(sig_blob);
   session->session_state = SSH_SESSION_STATE_ERROR;
   return SSH_PACKET_USED;
 }

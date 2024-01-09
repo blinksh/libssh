@@ -59,6 +59,7 @@ static int session_teardown(void **state)
     return 0;
 }
 
+#ifdef NC_EXECUTABLE
 static void torture_options_set_proxycommand(void **state)
 {
     struct torture_state *s = *state;
@@ -70,13 +71,13 @@ static void torture_options_set_proxycommand(void **state)
     int rc;
     socket_t fd;
 
-    rc = stat("/bin/nc", &sb);
+    rc = stat(NC_EXECUTABLE, &sb);
     if (rc != 0 || (sb.st_mode & S_IXOTH) == 0) {
-        SSH_LOG(SSH_LOG_WARNING, "Could not find /bin/nc: Skipping the test");
+        SSH_LOG(SSH_LOG_WARNING, "Could not find " NC_EXECUTABLE ": Skipping the test");
         skip();
     }
 
-    rc = snprintf(command, sizeof(command), "/bin/nc %s %d", address, port);
+    rc = snprintf(command, sizeof(command), NC_EXECUTABLE " %s %d", address, port);
     assert_true((size_t)rc < sizeof(command));
 
     rc = ssh_options_set(session, SSH_OPTIONS_PROXYCOMMAND, command);
@@ -88,6 +89,16 @@ static void torture_options_set_proxycommand(void **state)
     rc = fcntl(fd, F_GETFL);
     assert_int_equal(rc & O_RDWR, O_RDWR);
 }
+
+#else /* NC_EXECUTABLE */
+
+static void torture_options_set_proxycommand(void **state)
+{
+    (void) state;
+    skip();
+}
+
+#endif /* NC_EXECUTABLE */
 
 static void torture_options_set_proxycommand_notexist(void **state) {
     struct torture_state *s = *state;
@@ -150,6 +161,56 @@ static void torture_options_set_proxycommand_ssh_stderr(void **state)
     assert_int_equal(rc & O_RDWR, O_RDWR);
 }
 
+static void torture_options_proxycommand_injection(void **state)
+{
+    struct torture_state *s = *state;
+    struct passwd *pwd = NULL;
+    const char *malicious_host = "`echo foo > mfile`";
+    const char *command = "nc %h %p";
+    char *current_dir = NULL;
+    char *malicious_file_path = NULL;
+    int mfp_len;
+    int verbosity = torture_libssh_verbosity();
+    struct stat sb;
+    int rc;
+
+    pwd = getpwnam("bob");
+    assert_non_null(pwd);
+
+    rc = setuid(pwd->pw_uid);
+    assert_return_code(rc, errno);
+
+    s->ssh.session = ssh_new();
+    assert_non_null(s->ssh.session);
+
+    ssh_options_set(s->ssh.session, SSH_OPTIONS_LOG_VERBOSITY, &verbosity);
+    // if we would be checking the rc, this should fail
+    ssh_options_set(s->ssh.session, SSH_OPTIONS_HOST, malicious_host);
+
+    ssh_options_set(s->ssh.session, SSH_OPTIONS_USER, TORTURE_SSH_USER_ALICE);
+
+    rc = ssh_options_set(s->ssh.session, SSH_OPTIONS_PROXYCOMMAND, command);
+    assert_int_equal(rc, 0);
+    rc = ssh_connect(s->ssh.session);
+    assert_ssh_return_code_equal(s->ssh.session, rc, SSH_ERROR);
+
+    current_dir = torture_get_current_working_dir();
+    assert_non_null(current_dir);
+    mfp_len = strlen(current_dir) + 6;
+    malicious_file_path = malloc(mfp_len);
+    assert_non_null(malicious_file_path);
+    rc = snprintf(malicious_file_path, mfp_len,
+                  "%s/mfile", current_dir);
+    assert_int_equal(rc, mfp_len);
+    free(current_dir);
+    rc = stat(malicious_file_path, &sb);
+    assert_int_not_equal(rc, 0);
+
+    // cleanup
+    remove(malicious_file_path);
+    free(malicious_file_path);
+}
+
 int torture_run_tests(void) {
     int rc;
     struct CMUnitTest tests[] = {
@@ -164,6 +225,9 @@ int torture_run_tests(void) {
                                         session_teardown),
         cmocka_unit_test_setup_teardown(torture_options_set_proxycommand_ssh_stderr,
                                         session_setup,
+                                        session_teardown),
+        cmocka_unit_test_setup_teardown(torture_options_proxycommand_injection,
+                                        NULL,
                                         session_teardown),
     };
 

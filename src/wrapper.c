@@ -147,15 +147,16 @@ static void cipher_free(struct ssh_cipher_struct *cipher) {
   SAFE_FREE(cipher);
 }
 
-struct ssh_crypto_struct *crypto_new(void) {
-   struct ssh_crypto_struct *crypto;
+struct ssh_crypto_struct *crypto_new(void)
+{
+    struct ssh_crypto_struct *crypto;
 
-  crypto = malloc(sizeof(struct ssh_crypto_struct));
-  if (crypto == NULL) {
-    return NULL;
-  }
-  ZERO_STRUCTP(crypto);
-  return crypto;
+    crypto = malloc(sizeof(struct ssh_crypto_struct));
+    if (crypto == NULL) {
+        return NULL;
+    }
+    ZERO_STRUCTP(crypto);
+    return crypto;
 }
 
 void crypto_free(struct ssh_crypto_struct *crypto)
@@ -182,8 +183,9 @@ void crypto_free(struct ssh_crypto_struct *crypto)
         crypto->ecdh_privkey = NULL;
     }
 #endif
+    SAFE_FREE(crypto->dh_server_signature);
     if (crypto->session_id != NULL) {
-        explicit_bzero(crypto->session_id, crypto->digest_len);
+        explicit_bzero(crypto->session_id, crypto->session_id_len);
         SAFE_FREE(crypto->session_id);
     }
     if (crypto->secret_hash != NULL) {

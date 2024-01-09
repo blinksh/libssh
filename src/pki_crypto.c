@@ -833,7 +833,12 @@ ssh_string pki_private_key_to_pem(const ssh_key key,
         goto err;
     }
 
-    ssh_string_fill(blob, buf->data, buf->length);
+    rc = ssh_string_fill(blob, buf->data, buf->length);
+    if (rc < 0) {
+        ssh_string_free(blob);
+        goto err;
+    }
+
     BIO_free(mem);
 
     return blob;
@@ -1396,6 +1401,7 @@ static ssh_string pki_dsa_signature_to_blob(const ssh_signature sig)
 
     const unsigned char *raw_sig_data = NULL;
     size_t raw_sig_len;
+    int rc;
 
     DSA_SIG *dsa_sig;
 
@@ -1452,7 +1458,11 @@ static ssh_string pki_dsa_signature_to_blob(const ssh_signature sig)
         return NULL;
     }
 
-    ssh_string_fill(sig_blob, buffer, 40);
+    rc = ssh_string_fill(sig_blob, buffer, 40);
+    if (rc < 0) {
+        SSH_STRING_FREE(sig_blob);
+        return NULL;
+    }
 
     return sig_blob;
 
@@ -1529,7 +1539,10 @@ static ssh_string pki_ecdsa_signature_to_blob(const ssh_signature sig)
         goto error;
     }
 
-    ssh_string_fill(sig_blob, ssh_buffer_get(buf), ssh_buffer_get_len(buf));
+    rc = ssh_string_fill(sig_blob, ssh_buffer_get(buf), ssh_buffer_get_len(buf));
+    if (rc < 0) {
+        goto error;
+    }
 
     SSH_STRING_FREE(r);
     SSH_STRING_FREE(s);
@@ -1539,6 +1552,7 @@ static ssh_string pki_ecdsa_signature_to_blob(const ssh_signature sig)
     return sig_blob;
 
 error:
+    SSH_STRING_FREE(sig_blob);
     SSH_STRING_FREE(r);
     SSH_STRING_FREE(s);
     ECDSA_SIG_free(ecdsa_sig);
@@ -1660,6 +1674,7 @@ static int pki_signature_from_dsa_blob(UNUSED_PARAM(const ssh_key pubkey),
 
     int raw_sig_len = 0;
     unsigned char *raw_sig_data = NULL;
+    unsigned char *temp_raw_sig = NULL;
 
     int rc;
 
@@ -1682,7 +1697,11 @@ static int pki_signature_from_dsa_blob(UNUSED_PARAM(const ssh_key pubkey),
     if (r == NULL) {
         goto error;
     }
-    ssh_string_fill(r, ssh_string_data(sig_blob), 20);
+    rc = ssh_string_fill(r, ssh_string_data(sig_blob), 20);
+    if (rc < 0) {
+        SSH_STRING_FREE(r);
+        goto error;
+    }
 
     pr = ssh_make_string_bn(r);
     ssh_string_burn(r);
@@ -1695,7 +1714,11 @@ static int pki_signature_from_dsa_blob(UNUSED_PARAM(const ssh_key pubkey),
     if (s == NULL) {
         goto error;
     }
-    ssh_string_fill(s, (char *)ssh_string_data(sig_blob) + 20, 20);
+    rc = ssh_string_fill(s, (char *)ssh_string_data(sig_blob) + 20, 20);
+    if (rc < 0) {
+        SSH_STRING_FREE(s);
+        goto error;
+    }
 
     ps = ssh_make_string_bn(s);
     ssh_string_burn(s);
@@ -1718,8 +1741,23 @@ static int pki_signature_from_dsa_blob(UNUSED_PARAM(const ssh_key pubkey),
     ps = NULL;
     pr = NULL;
 
-    raw_sig_len = i2d_DSA_SIG(dsa_sig, &raw_sig_data);
-    if (raw_sig_len < 0) {
+    /* Get the expected size of the buffer */
+    rc = i2d_DSA_SIG(dsa_sig, NULL);
+    if (rc <= 0) {
+        goto error;
+    }
+    raw_sig_len = rc;
+
+    raw_sig_data = (unsigned char *)calloc(1, raw_sig_len);
+    if (raw_sig_data == NULL) {
+        goto error;
+    }
+    temp_raw_sig = raw_sig_data;
+
+    /* It is necessary to use a temporary pointer as i2d_* "advances" the
+     * pointer */
+    raw_sig_len = i2d_DSA_SIG(dsa_sig, &temp_raw_sig);
+    if (raw_sig_len <= 0) {
         goto error;
     }
 
@@ -1763,6 +1801,7 @@ static int pki_signature_from_ecdsa_blob(UNUSED_PARAM(const ssh_key pubkey),
     uint32_t rlen;
 
     unsigned char *raw_sig_data = NULL;
+    unsigned char *temp_raw_sig = NULL;
     size_t raw_sig_len = 0;
 
     int rc;
@@ -1838,11 +1877,25 @@ static int pki_signature_from_ecdsa_blob(UNUSED_PARAM(const ssh_key pubkey),
     pr = NULL;
     ps = NULL;
 
-    rc = i2d_ECDSA_SIG(ecdsa_sig, &raw_sig_data);
-    if (rc < 0) {
+    /* Get the expected size of the buffer */
+    rc = i2d_ECDSA_SIG(ecdsa_sig, NULL);
+    if (rc <= 0) {
         goto error;
     }
     raw_sig_len = rc;
+
+    raw_sig_data = (unsigned char *)calloc(1, raw_sig_len);
+    if (raw_sig_data == NULL) {
+        goto error;
+    }
+    temp_raw_sig = raw_sig_data;
+
+    /* It is necessary to use a temporary pointer as i2d_* "advances" the
+     * pointer */
+    rc = i2d_ECDSA_SIG(ecdsa_sig, &temp_raw_sig);
+    if (rc <= 0) {
+        goto error;
+    }
 
     sig->raw_sig = ssh_string_new(raw_sig_len);
     if (sig->raw_sig == NULL) {
@@ -2258,8 +2311,12 @@ int pki_verify_data_signature(ssh_signature signature,
     unsigned char *raw_sig_data = NULL;
     unsigned int raw_sig_len;
 
+    /* Function return code
+     * Do not change this variable throughout the function until the signature
+     * is successfully verified!
+     */
     int rc = SSH_ERROR;
-    int evp_rc;
+    int ok;
 
     if (pubkey == NULL || ssh_key_is_private(pubkey) || input == NULL ||
         signature == NULL || (signature->raw_sig == NULL
@@ -2274,8 +2331,8 @@ int pki_verify_data_signature(ssh_signature signature,
     }
 
     /* Check if public key and hash type are compatible */
-    rc = pki_key_check_hash_compatible(pubkey, signature->hash_type);
-    if (rc != SSH_OK) {
+    ok = pki_key_check_hash_compatible(pubkey, signature->hash_type);
+    if (ok != SSH_OK) {
         return SSH_ERROR;
     }
 
@@ -2320,8 +2377,8 @@ int pki_verify_data_signature(ssh_signature signature,
     }
 
     /* Verify the signature */
-    evp_rc = EVP_DigestVerifyInit(ctx, NULL, md, NULL, pkey);
-    if (evp_rc != 1){
+    ok = EVP_DigestVerifyInit(ctx, NULL, md, NULL, pkey);
+    if (ok != 1){
         SSH_LOG(SSH_LOG_TRACE,
                 "EVP_DigestVerifyInit() failed: %s",
                 ERR_error_string(ERR_get_error(), NULL));
@@ -2329,35 +2386,31 @@ int pki_verify_data_signature(ssh_signature signature,
     }
 
 #ifdef HAVE_OPENSSL_EVP_DIGESTVERIFY
-    evp_rc = EVP_DigestVerify(ctx, raw_sig_data, raw_sig_len, input, input_len);
+    ok = EVP_DigestVerify(ctx, raw_sig_data, raw_sig_len, input, input_len);
 #else
-    evp_rc = EVP_DigestVerifyUpdate(ctx, input, input_len);
-    if (evp_rc != 1) {
+    ok = EVP_DigestVerifyUpdate(ctx, input, input_len);
+    if (ok != 1) {
         SSH_LOG(SSH_LOG_TRACE,
                 "EVP_DigestVerifyUpdate() failed: %s",
                 ERR_error_string(ERR_get_error(), NULL));
         goto out;
     }
 
-    evp_rc = EVP_DigestVerifyFinal(ctx, raw_sig_data, raw_sig_len);
+    ok = EVP_DigestVerifyFinal(ctx, raw_sig_data, raw_sig_len);
 #endif
-    if (evp_rc == 1) {
-        SSH_LOG(SSH_LOG_TRACE, "Signature valid");
-        rc = SSH_OK;
-    } else {
+    if (ok != 1) {
         SSH_LOG(SSH_LOG_TRACE,
                 "Signature invalid: %s",
                 ERR_error_string(ERR_get_error(), NULL));
-        rc = SSH_ERROR;
+        goto out;
     }
 
+    SSH_LOG(SSH_LOG_TRACE, "Signature valid");
+    rc = SSH_OK;
+
 out:
-    if (ctx != NULL) {
-        EVP_MD_CTX_free(ctx);
-    }
-    if (pkey != NULL) {
-        EVP_PKEY_free(pkey);
-    }
+    EVP_MD_CTX_free(ctx);
+    EVP_PKEY_free(pkey);
     return rc;
 }
 

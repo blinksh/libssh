@@ -2,6 +2,8 @@ variables:
   BUILD_IMAGES_PROJECT: libssh/build-images
   FEDORA_BUILD: buildenv-fedora
   CENTOS7_BUILD: buildenv-centos7
+  CENTOS8_BUILD: buildenv-c8s
+  CENTOS9_BUILD: buildenv-c9s
   TUMBLEWEED_BUILD: buildenv-tumbleweed
   MINGW_BUILD: buildenv-mingw
 
@@ -19,6 +21,47 @@ centos7/openssl_1.0.x/x86_64:
   - shared
   except:
   - tags
+  artifacts:
+    expire_in: 1 week
+    when: on_failure
+    paths:
+      - obj/
+
+centos8/openssl_1.1.1/x86_64:
+  image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$CENTOS8_BUILD
+  script:
+    - mkdir -p obj && cd obj && cmake
+      -DCMAKE_BUILD_TYPE=RelWithDebInfo
+      -DPICKY_DEVELOPER=ON
+      -DWITH_BLOWFISH_CIPHER=ON
+      -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
+      -DUNIT_TESTING=ON -DCLIENT_TESTING=ON -DSERVER_TESTING=ON .. &&
+      make -j$(nproc) && ctest --output-on-failure
+  tags:
+    - shared
+  except:
+    - tags
+  artifacts:
+    expire_in: 1 week
+    when: on_failure
+    paths:
+      - obj/
+
+centos9/openssl_3.0.x/x86_64:
+  image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$CENTOS9_BUILD
+  script:
+    - export OPENSSL_ENABLE_SHA1_SIGNATURES=1
+    - mkdir -p obj && cd obj && cmake
+      -DCMAKE_BUILD_TYPE=RelWithDebInfo
+      -DPICKY_DEVELOPER=ON
+      -DWITH_BLOWFISH_CIPHER=ON
+      -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
+      -DUNIT_TESTING=ON -DCLIENT_TESTING=ON -DSERVER_TESTING=ON .. &&
+      make -j$(nproc) && ctest --output-on-failure
+  tags:
+    - shared
+  except:
+    - tags
   artifacts:
     expire_in: 1 week
     when: on_failure
@@ -47,8 +90,8 @@ fedora/openssl_1.1.x/x86_64:
     paths:
       - obj/
 
-fedora/openssl_1.1.x/x86_64/fips:
-  image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$FEDORA_BUILD
+centos8/openssl_1.1.1/x86_64/fips:
+  image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$CENTOS8_BUILD
   script:
   - echo 1 > /etc/system-fips
   - update-crypto-policies --set FIPS
@@ -197,11 +240,13 @@ freebsd/x86_64:
     make && ctest --output-on-failure
   tags:
   - freebsd
+  - private
   except:
   - tags
   only:
   - branches@libssh/libssh-mirror
   - branches@cryptomilk/libssh-mirror
+  - branches@jjelen/libssh-mirror
   artifacts:
     expire_in: 1 week
     when: on_failure
@@ -455,61 +500,55 @@ tumbleweed/static-analysis:
     paths:
       - obj/scan
 
-visualstudio/x86_64:
+###############################################################################
+#                           Visual Studio builds                              #
+###############################################################################
+.vs:
+  stage: test
+  cache:
+    key: vcpkg.${CI_JOB_NAME}
+    paths:
+      - .vcpkg
   variables:
     ErrorActionPreference: STOP
   script:
-  - $env:VCPKG_DEFAULT_TRIPLET="x64-windows"
-  - mkdir -p obj; if ($?) {cd obj}; if (! $?) {exit 1}
-  - cmake
-      -A x64
-      -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_TOOLCHAIN_FILE"
-      -DPICKY_DEVELOPER=ON
-      -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
-      -DUNIT_TESTING=ON ..
-  - cmake --build .
-  - ctest --output-on-failure
+    - cmake --build .
+    - ctest --output-on-failure
   tags:
-  - vs2017
-  - windows
+    - windows
+    - shared-windows
   except:
-  - tags
-  only:
-  - branches@libssh/libssh-mirror
-  - branches@ansasaki/libssh-mirror
-  - branches@cryptomilk/libssh-mirror
-  - branches@jjelen/libssh-mirror
+    - tags
   artifacts:
     expire_in: 1 week
     when: on_failure
     paths:
       - obj/
+  before_script:
+    - If (!(test-path .vcpkg\archives)) { mkdir -p .vcpkg\archives }
+    - $env:VCPKG_DEFAULT_BINARY_CACHE="$PWD\.vcpkg\archives"
+    - echo $env:VCPKG_DEFAULT_BINARY_CACHE
+    - $env:VCPKG_DEFAULT_TRIPLET="$TRIPLET-windows"
+    - vcpkg install cmocka
+    - vcpkg install openssl
+    - vcpkg install zlib
+    - vcpkg integrate install
+    - mkdir -p obj; if ($?) {cd obj}; if (! $?) {exit 1}
+    - cmake
+        -A $PLATFORM
+        -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+        -DPICKY_DEVELOPER=ON
+        -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
+        -DUNIT_TESTING=ON ..
+
+visualstudio/x86_64:
+  extends: .vs
+  variables:
+    PLATFORM: "x64"
+    TRIPLET: "x64"
 
 visualstudio/x86:
+  extends: .vs
   variables:
-    ErrorActionPreference: STOP
-  script:
-  - $env:VCPKG_DEFAULT_TRIPLET="x86-windows"
-  - mkdir -p obj; if ($?) {cd obj}; if (! $?) {exit 1}
-  - cmake
-      -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_TOOLCHAIN_FILE"
-      -DPICKY_DEVELOPER=ON
-      -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
-      -DUNIT_TESTING=ON ..
-  - cmake --build .
-  - ctest --output-on-failure
-  tags:
-  - vs2017
-  - windows
-  except:
-  - tags
-  only:
-  - branches@libssh/libssh-mirror
-  - branches@ansasaki/libssh-mirror
-  - branches@cryptomilk/libssh-mirror
-  - branches@jjelen/libssh-mirror
-  artifacts:
-    expire_in: 1 week
-    when: on_failure
-    paths:
-      - obj/
+    PLATFORM: "win32"
+    TRIPLET: "x86"

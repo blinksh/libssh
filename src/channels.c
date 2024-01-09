@@ -29,6 +29,9 @@
 #include <errno.h>
 #include <time.h>
 #include <stdbool.h>
+#ifdef HAVE_SYS_TIME_H
+#include <sys/time.h>
+#endif /* HAVE_SYS_TIME_H */
 
 #ifndef _WIN32
 #include <netinet/in.h>
@@ -117,6 +120,13 @@ ssh_channel ssh_channel_new(ssh_session session)
 
     if (session->channels == NULL) {
         session->channels = ssh_list_new();
+        if (session->channels == NULL) {
+            ssh_set_error_oom(session);
+            SSH_BUFFER_FREE(channel->stdout_buffer);
+            SSH_BUFFER_FREE(channel->stderr_buffer);
+            SAFE_FREE(channel);
+            return NULL;
+        }
     }
 
     ssh_list_prepend(session->channels, channel);
@@ -2932,14 +2942,15 @@ int ssh_channel_read_timeout(ssh_channel channel,
   if (session->session_state == SSH_SESSION_STATE_ERROR) {
       return SSH_ERROR;
   }
+  /* If the server closed the channel properly, there is nothing to do */
+  if (channel->remote_eof && ssh_buffer_get_len(stdbuf) == 0) {
+      return 0;
+  }
   if (channel->state == SSH_CHANNEL_STATE_CLOSED) {
       ssh_set_error(session,
                     SSH_FATAL,
                     "Remote channel is closed.");
       return SSH_ERROR;
-  }
-  if (channel->remote_eof && ssh_buffer_get_len(stdbuf) == 0) {
-    return 0;
   }
   len = ssh_buffer_get_len(stdbuf);
   /* Read count bytes if len is greater, everything otherwise */
@@ -3095,7 +3106,7 @@ int ssh_channel_poll_timeout(ssh_channel channel, int timeout, int is_stderr)
     size_t len;
     int rc;
 
-    if(channel == NULL) {
+    if (channel == NULL) {
         return SSH_ERROR;
     }
 
@@ -3113,8 +3124,14 @@ int ssh_channel_poll_timeout(ssh_channel channel, int timeout, int is_stderr)
                                         ssh_channel_read_termination,
                                         &ctx);
     if (rc == SSH_ERROR ||
-       session->session_state == SSH_SESSION_STATE_ERROR) {
+        session->session_state == SSH_SESSION_STATE_ERROR) {
         rc = SSH_ERROR;
+        goto out;
+    } else if (rc == SSH_AGAIN) {
+        /* If the above timeout expired, it is ok and we do not need to
+         * attempt to check the read buffer. The calling functions do not
+         * expect us to return SSH_AGAIN either here. */
+        rc = SSH_OK;
         goto out;
     }
     len = ssh_buffer_get_len(stdbuf);
@@ -3386,9 +3403,15 @@ int ssh_channel_select(ssh_channel *readchans, ssh_channel *writechans,
     firstround=0;
   } while(1);
 
-  memcpy(readchans, rchans, (count_ptrs(rchans) + 1) * sizeof(ssh_channel ));
-  memcpy(writechans, wchans, (count_ptrs(wchans) + 1) * sizeof(ssh_channel ));
-  memcpy(exceptchans, echans, (count_ptrs(echans) + 1) * sizeof(ssh_channel ));
+  if (readchans != &dummy) {
+      memcpy(readchans, rchans, (count_ptrs(rchans) + 1) * sizeof(ssh_channel));
+  }
+  if (writechans != &dummy) {
+      memcpy(writechans, wchans, (count_ptrs(wchans) + 1) * sizeof(ssh_channel));
+  }
+  if (exceptchans != &dummy) {
+      memcpy(exceptchans, echans, (count_ptrs(echans) + 1) * sizeof(ssh_channel));
+  }
   SAFE_FREE(rchans);
   SAFE_FREE(wchans);
   SAFE_FREE(echans);

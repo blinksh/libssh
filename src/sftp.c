@@ -32,6 +32,9 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdint.h>
+#ifdef HAVE_SYS_TIME_H
+#include <sys/time.h>
+#endif /* HAVE_SYS_TIME_H */
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <limits.h>
@@ -173,49 +176,56 @@ error:
     return NULL;
 }
 
-sftp_session sftp_new_channel(ssh_session session, ssh_channel channel){
-  sftp_session sftp;
+sftp_session
+sftp_new_channel(ssh_session session, ssh_channel channel)
+{
+    sftp_session sftp = NULL;
 
-  if (session == NULL) {
-    return NULL;
-  }
+    if (session == NULL) {
+        return NULL;
+    }
 
-  sftp = calloc(1, sizeof(struct sftp_session_struct));
-  if (sftp == NULL) {
-    ssh_set_error_oom(session);
+    sftp = calloc(1, sizeof(struct sftp_session_struct));
+    if (sftp == NULL) {
+        ssh_set_error_oom(session);
+        return NULL;
+    }
 
-    return NULL;
-  }
+    sftp->ext = sftp_ext_new();
+    if (sftp->ext == NULL) {
+        ssh_set_error_oom(session);
+        goto error;
+    }
 
-  sftp->ext = sftp_ext_new();
-  if (sftp->ext == NULL) {
-    ssh_set_error_oom(session);
+    sftp->read_packet = calloc(1, sizeof(struct sftp_packet_struct));
+    if (sftp->read_packet == NULL) {
+        ssh_set_error_oom(session);
+        goto error;
+    }
+
+    sftp->read_packet->payload = ssh_buffer_new();
+    if (sftp->read_packet->payload == NULL) {
+        ssh_set_error_oom(session);
+        goto error;
+    }
+
+    sftp->session = session;
+    sftp->channel = channel;
+
+    return sftp;
+
+error:
+    if (sftp->ext != NULL) {
+        sftp_ext_free(sftp->ext);
+    }
+    if (sftp->read_packet != NULL) {
+        if (sftp->read_packet->payload != NULL) {
+            SSH_BUFFER_FREE(sftp->read_packet->payload);
+        }
+        SAFE_FREE(sftp->read_packet);
+    }
     SAFE_FREE(sftp);
-
     return NULL;
-  }
-
-  sftp->read_packet = calloc(1, sizeof(struct sftp_packet_struct));
-  if (sftp->read_packet == NULL) {
-    ssh_set_error_oom(session);
-    SAFE_FREE(sftp);
-
-    return NULL;
-  }
-
-  sftp->read_packet->payload = ssh_buffer_new();
-  if (sftp->read_packet->payload == NULL) {
-    ssh_set_error_oom(session);
-    SAFE_FREE(sftp);
-
-    return NULL;
-  }
-
-
-  sftp->session = session;
-  sftp->channel = channel;
-
-  return sftp;
 }
 
 #ifdef WITH_SERVER
@@ -1190,13 +1200,13 @@ static sftp_attributes sftp_parse_attr_4(sftp_session sftp, ssh_buffer buf,
         break;
       }
       attr->atime64 = ntohll(attr->atime64);
-    }
 
-    if (flags & SSH_FILEXFER_ATTR_SUBSECOND_TIMES) {
-      if (ssh_buffer_get_u32(buf, &attr->atime_nseconds) != 4) {
-        break;
+      if (flags & SSH_FILEXFER_ATTR_SUBSECOND_TIMES) {
+        if (ssh_buffer_get_u32(buf, &attr->atime_nseconds) != 4) {
+          break;
+        }
+        attr->atime_nseconds = ntohl(attr->atime_nseconds);
       }
-      attr->atime_nseconds = ntohl(attr->atime_nseconds);
     }
 
     if (flags & SSH_FILEXFER_ATTR_CREATETIME) {
@@ -1204,13 +1214,13 @@ static sftp_attributes sftp_parse_attr_4(sftp_session sftp, ssh_buffer buf,
         break;
       }
       attr->createtime = ntohll(attr->createtime);
-    }
 
-    if (flags & SSH_FILEXFER_ATTR_SUBSECOND_TIMES) {
-      if (ssh_buffer_get_u32(buf, &attr->createtime_nseconds) != 4) {
-        break;
+      if (flags & SSH_FILEXFER_ATTR_SUBSECOND_TIMES) {
+        if (ssh_buffer_get_u32(buf, &attr->createtime_nseconds) != 4) {
+          break;
+        }
+        attr->createtime_nseconds = ntohl(attr->createtime_nseconds);
       }
-      attr->createtime_nseconds = ntohl(attr->createtime_nseconds);
     }
 
     if (flags & SSH_FILEXFER_ATTR_MODIFYTIME) {
@@ -1218,13 +1228,13 @@ static sftp_attributes sftp_parse_attr_4(sftp_session sftp, ssh_buffer buf,
         break;
       }
       attr->mtime64 = ntohll(attr->mtime64);
-    }
 
-    if (flags & SSH_FILEXFER_ATTR_SUBSECOND_TIMES) {
-      if (ssh_buffer_get_u32(buf, &attr->mtime_nseconds) != 4) {
-        break;
+      if (flags & SSH_FILEXFER_ATTR_SUBSECOND_TIMES) {
+        if (ssh_buffer_get_u32(buf, &attr->mtime_nseconds) != 4) {
+          break;
+        }
+        attr->mtime_nseconds = ntohl(attr->mtime_nseconds);
       }
-      attr->mtime_nseconds = ntohl(attr->mtime_nseconds);
     }
 
     if (flags & SSH_FILEXFER_ATTR_ACL) {

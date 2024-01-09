@@ -52,6 +52,7 @@ static int session_setup(void **state)
 {
     struct torture_state *s = *state;
     int verbosity = torture_libssh_verbosity();
+    const char *all_keytypes = NULL;
     struct passwd *pwd;
     bool b = false;
     int rc;
@@ -69,6 +70,11 @@ static int session_setup(void **state)
     ssh_options_set(s->ssh.session, SSH_OPTIONS_HOST, TORTURE_SSH_SERVER);
     /* Make sure no other configuration options from system will get used */
     rc = ssh_options_set(s->ssh.session, SSH_OPTIONS_PROCESS_CONFIG, &b);
+    assert_ssh_return_code(s->ssh.session, rc);
+
+    /* Enable all hostkeys */
+    all_keytypes = ssh_kex_get_supported_method(SSH_HOSTKEYS);
+    rc = ssh_options_set(s->ssh.session, SSH_OPTIONS_PUBLICKEY_ACCEPTED_TYPES, all_keytypes);
     assert_ssh_return_code(s->ssh.session, rc);
 
     return 0;
@@ -194,7 +200,8 @@ static int agent_teardown(void **state)
     assert_non_null(ssh_agent_pidfile);
 
     /* kill agent pid */
-    torture_terminate_process(ssh_agent_pidfile);
+    rc = torture_terminate_process(ssh_agent_pidfile);
+    assert_return_code(rc, errno);
 
     unlink(ssh_agent_pidfile);
 
@@ -545,6 +552,7 @@ static void torture_auth_cert(void **state) {
 
 static void torture_auth_agent_cert(void **state)
 {
+#if OPENSSH_VERSION_MAJOR < 8 || (OPENSSH_VERSION_MAJOR == 8 && OPENSSH_VERSION_MINOR == 0)
     struct torture_state *s = *state;
     ssh_session session = s->ssh.session;
     int rc;
@@ -564,6 +572,7 @@ static void torture_auth_agent_cert(void **state)
                              "ssh-rsa-cert-v01@openssh.com");
         assert_int_equal(rc, SSH_OK);
     }
+#endif /* OPENSSH_VERSION_MAJOR < 8.1 */
 
     /* Setup loads a different key, tests are exactly the same. */
     torture_auth_agent(state);
@@ -571,6 +580,7 @@ static void torture_auth_agent_cert(void **state)
 
 static void torture_auth_agent_cert_nonblocking(void **state)
 {
+#if OPENSSH_VERSION_MAJOR < 8 || (OPENSSH_VERSION_MAJOR == 8 && OPENSSH_VERSION_MINOR == 0)
     struct torture_state *s = *state;
     ssh_session session = s->ssh.session;
     int rc;
@@ -590,6 +600,7 @@ static void torture_auth_agent_cert_nonblocking(void **state)
                              "ssh-rsa-cert-v01@openssh.com");
         assert_int_equal(rc, SSH_OK);
     }
+#endif /* OPENSSH_VERSION_MAJOR < 8.1 */
 
     torture_auth_agent_nonblocking(state);
 }
